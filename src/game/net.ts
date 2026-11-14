@@ -1,13 +1,14 @@
 import type { DataConnection, Peer as PeerType } from 'peerjs'
-import type { NetMessage, PlayerInfo } from './types'
+import { MODES, type MatchMode } from './rules'
+import type { MatchSync, NetMessage, PlayerInfo } from './types'
 
 /**
- * Star topology over PeerJS: the host owns the room peer id `bladehop-<CODE>`,
+ * Star topology over PeerJS: the host owns the room peer id `bladeline-v2-<CODE>`,
  * every client connects to the host, and the host relays all messages.
  * Uses the free public PeerJS signalling server; gameplay data flows over WebRTC.
  */
 
-const PREFIX = 'bladehop-v1-'
+const PREFIX = 'bladeline-v2-'
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
 export function makeRoomCode() {
@@ -21,6 +22,12 @@ export interface NetHandlers {
   onReady: (myId: string, room: string) => void
   onError: (message: string) => void
   onPeerLeft: (id: string) => void
+  /** host only: current match state, sent to new players in `welcome` */
+  getMatch?: () => MatchSync
+}
+
+export interface HostConfig {
+  mode: MatchMode
 }
 
 export class Net {
@@ -33,25 +40,32 @@ export class Net {
   /** host-only: roster of everyone in the room */
   roster = new Map<string, PlayerInfo>()
   private closed = false
+  private config: HostConfig = { mode: 'ffa' }
 
   constructor(private handlers: NetHandlers) {}
 
-  async hostRoom(me: { name: string; color: string }, code = makeRoomCode(), attempt = 0): Promise<void> {
+  async hostRoom(
+    me: { name: string; color: string; team?: number },
+    config: HostConfig,
+    code = makeRoomCode(),
+    attempt = 0,
+  ): Promise<void> {
     const { Peer } = await import('peerjs')
     this.isHost = true
+    this.config = config
     this.room = code
     const peer = new Peer(PREFIX + code, { debug: 0 })
     this.peer = peer
     peer.on('open', (id) => {
       this.myId = id
-      this.roster.set(id, { id, name: me.name, color: me.color, kills: 0, deaths: 0 })
+      this.roster.set(id, { id, name: me.name, color: me.color, kills: 0, deaths: 0, team: me.team })
       this.handlers.onReady(id, code)
     })
     peer.on('connection', (conn) => this.acceptClient(conn))
     peer.on('error', (err: { type?: string; message?: string }) => {
       if (err.type === 'unavailable-id' && attempt < 4) {
         peer.destroy()
-        void this.hostRoom(me, makeRoomCode(), attempt + 1)
+        void this.hostRoom(me, config, makeRoomCode(), attempt + 1)
         return
       }
       if (err.type === 'peer-unavailable') return // a client vanished mid-handshake
@@ -66,22 +80,38 @@ export class Net {
     conn.on('data', (raw) => {
       const msg = raw as NetMessage
       if (msg.t === 'hello') {
+        const mode = MODES[this.config.mode]
+        if (this.roster.size >= mode.maxPlayers) {
+          conn.send({ t: 'reject', reason: `Room is full (${mode.maxPlayers} players max).` } satisfies NetMessage)
+          setTimeout(() => conn.close(), 300)
+          return
+        }
         const info: PlayerInfo = {
           id: conn.peer,
           name: String(msg.name).slice(0, 16) || 'Ronin',
-          color: String(msg.color),
+          color: String(msg.color).slice(0, 9),
           kills: 0,
           deaths: 0,
+          team: mode.teamSize > 0 ? this.smallerTeam() : undefined,
         }
         this.clients.set(conn.peer, conn)
         this.roster.set(conn.peer, info)
-        conn.send({ t: 'welcome', you: conn.peer, players: [...this.roster.values()] } satisfies NetMessage)
+        const m: MatchSync = this.handlers.getMatch?.() ?? {
+          mode: this.config.mode,
+          phase: 'live',
+          timeLeft: mode.timeLimit,
+          teamScores: [0, 0],
+          winner: null,
+        }
+        conn.send({ t: 'welcome', you: conn.peer, players: [...this.roster.values()], m } satisfies NetMessage)
         const join: NetMessage = { t: 'join', player: info }
         this.relay(join, conn.peer)
         this.handlers.onMessage(join, conn.peer)
         return
       }
       if (!this.clients.has(conn.peer)) return
+      // host-only messages can never come from a client
+      if (msg.t === 'match' || msg.t === 'welcome' || msg.t === 'reject' || msg.t === 'join') return
       // never trust a client to speak for someone else
       if ('id' in msg && msg.t !== 'leave' && msg.t !== 'death') (msg as { id: string }).id = conn.peer
       if (msg.t === 'hit') msg.from = conn.peer
@@ -102,6 +132,21 @@ export class Net {
     }
     conn.on('close', drop)
     conn.on('error', drop)
+  }
+
+  private smallerTeam() {
+    let a = 0
+    let b = 0
+    for (const p of this.roster.values()) {
+      if (p.team === 0) a++
+      else if (p.team === 1) b++
+    }
+    return a <= b ? 0 : 1
+  }
+
+  /** host only: zero the roster scores when a new match starts */
+  resetScores() {
+    for (const p of this.roster.values()) p.kills = p.deaths = 0
   }
 
   private trackDeath(id: string, by: string) {
@@ -127,6 +172,13 @@ export class Net {
       conn.on('open', () => conn.send({ t: 'hello', name: me.name, color: me.color } satisfies NetMessage))
       conn.on('data', (raw) => {
         const msg = raw as NetMessage
+        if (msg.t === 'reject') {
+          welcomed = true
+          clearTimeout(timeout)
+          this.closed = true
+          this.handlers.onError(msg.reason)
+          return
+        }
         if (msg.t === 'welcome') {
           welcomed = true
           clearTimeout(timeout)

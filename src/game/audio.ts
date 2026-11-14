@@ -128,6 +128,44 @@ export class Sfx {
     this.wind.gain.gain.setTargetAtTime(target, ctx.currentTime, 0.15)
   }
 
+  setVolume(v: number) {
+    this.volume = v
+    if (this.master) this.master.gain.value = v
+  }
+
+  /** Call from a user gesture so iOS/Android allow sound. */
+  unlock() {
+    this.ensure()
+  }
+
+  ui(kind: 'hover' | 'click' | 'queue' | 'found' | 'tick' | 'go' | 'win' | 'lose') {
+    switch (kind) {
+      case 'hover':
+        return this.tone(1600, 1900, 0.04, 0.03)
+      case 'click':
+        return this.tone(700, 1100, 0.07, 0.1, 'triangle')
+      case 'queue':
+        return this.tone(420, 840, 0.18, 0.12, 'triangle')
+      case 'found':
+        this.tone(523, 1046, 0.2, 0.22, 'triangle')
+        setTimeout(() => this.tone(784, 1568, 0.3, 0.2, 'triangle'), 140)
+        return
+      case 'tick':
+        return this.tone(880, 880, 0.06, 0.12, 'square')
+      case 'go':
+        return this.tone(660, 1760, 0.3, 0.2, 'sawtooth')
+      case 'win':
+        this.tone(523, 523, 0.18, 0.2, 'triangle')
+        setTimeout(() => this.tone(659, 659, 0.18, 0.2, 'triangle'), 160)
+        setTimeout(() => this.tone(784, 1568, 0.5, 0.22, 'triangle'), 320)
+        return
+      case 'lose':
+        this.tone(392, 330, 0.25, 0.2, 'triangle')
+        setTimeout(() => this.tone(311, 196, 0.6, 0.2, 'triangle'), 220)
+        return
+    }
+  }
+
   close() {
     void this.ctx?.close()
   }

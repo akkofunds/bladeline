@@ -3,6 +3,8 @@
 @import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
+/* landscape phones and other short screens */
+@custom-variant short (@media (max-height: 540px));
 
 body {
   @apply m-0;
@@ -59,25 +61,25 @@ code {
 }
 
 .dark {
-  --background: oklch(0.16 0.04 290);
-  --foreground: oklch(0.97 0.01 60);
-  --card: oklch(0.2 0.045 290 / 0.82);
-  --card-foreground: oklch(0.97 0.01 60);
-  --popover: oklch(0.2 0.045 290);
-  --popover-foreground: oklch(0.97 0.01 60);
-  --primary: oklch(0.64 0.23 18);
+  --background: oklch(0.15 0.025 255);
+  --foreground: oklch(0.95 0.012 80);
+  --card: oklch(0.18 0.03 258 / 0.86);
+  --card-foreground: oklch(0.95 0.012 80);
+  --popover: oklch(0.19 0.03 258);
+  --popover-foreground: oklch(0.95 0.012 80);
+  --primary: oklch(0.65 0.22 20);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.28 0.05 290);
-  --secondary-foreground: oklch(0.97 0.01 60);
-  --muted: oklch(0.26 0.04 290);
-  --muted-foreground: oklch(0.75 0.03 300);
-  --accent: oklch(0.85 0.14 200);
-  --accent-foreground: oklch(0.16 0.04 290);
+  --secondary: oklch(0.26 0.035 258);
+  --secondary-foreground: oklch(0.95 0.012 80);
+  --muted: oklch(0.24 0.03 258);
+  --muted-foreground: oklch(0.74 0.025 250);
+  --accent: oklch(0.83 0.13 180);
+  --accent-foreground: oklch(0.15 0.025 255);
   --destructive: oklch(0.6 0.22 25);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.4 0.06 300 / 0.5);
-  --input: oklch(0.4 0.06 300 / 0.6);
-  --ring: oklch(0.64 0.23 18);
+  --border: oklch(0.55 0.03 250 / 0.35);
+  --input: oklch(0.55 0.03 250 / 0.45);
+  --ring: oklch(0.65 0.22 20);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -91,6 +93,8 @@ code {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.274 0.006 286.033);
   --sidebar-ring: oklch(0.442 0.017 285.786);
+  --ally: #35e0c2;
+  --enemy: #ff4a5c;
 }
 
 @theme inline {
@@ -142,5 +146,107 @@ code {
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* ---------- BLADELINE UI ---------- */
+
+html,
+body {
+  overscroll-behavior: none;
+}
+
+/* Angled tactical panels: one cut corner top-right and bottom-left */
+.clip-panel {
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+.clip-btn {
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+}
+.clip-tag {
+  clip-path: polygon(0 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+.bl-scanlines {
+  background-image: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px);
+}
+
+.safe-pad {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+@keyframes bl-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes bl-wipe {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes bl-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes bl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes bl-banner {
+  0% {
+    opacity: 0;
+    transform: scale(1.25);
+  }
+  12% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.animate-rise {
+  animation: bl-rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.animate-wipe {
+  animation: bl-wipe 0.7s cubic-bezier(0.7, 0, 0.2, 1) both;
+}
+.animate-blink {
+  animation: bl-pulse 1.2s ease-in-out infinite;
+}
+.animate-turn {
+  animation: bl-spin 1.4s linear infinite;
+}
+.animate-banner {
+  animation: bl-banner 1.8s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise,
+  .animate-wipe,
+  .animate-blink,
+  .animate-turn,
+  .animate-banner {
+    animation: none;
   }
 }

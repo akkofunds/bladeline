@@ -6,8 +6,8 @@ import { NotFoundPage } from '@/components/error-pages'
 
 import '../styles.css'
 
-const siteName = 'BLADEHOP — Katana Movement Arena'
-const siteDescription = 'A fast multiplayer katana arena: bunny hop, grapple, and slash your friends across a wide open map. Peer-to-peer rooms with live chat.'
+const siteName = 'BLADELINE: Katana Movement Arena'
+const siteDescription = 'A fast katana arena shooter without the guns: bunny hop, grapple and slash. Quick Play FFA, 2v2 and 5v5 Skirmish, a training range, and peer-to-peer rooms with friends. Runs on Chromebooks and phones.'
 
 export const Route = createRootRoute({
   head: () => ({
@@ -17,7 +17,7 @@ export const Route = createRootRoute({
       },
       {
         name: 'viewport',
-        content: 'width=device-width, initial-scale=1',
+        content: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover',
       },
       {
         title: siteName,
@@ -42,7 +42,10 @@ export const Route = createRootRoute({
         name: 'twitter:card',
         content: 'summary_large_image',
       },
-      { name: 'theme-color', content: '#120e24' },
+      { name: 'theme-color', content: '#0f1520' },
+      { name: 'mobile-web-app-capable', content: 'yes' },
+      { name: 'apple-mobile-web-app-capable', content: 'yes' },
+      { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
     ],
     links: [
       { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
