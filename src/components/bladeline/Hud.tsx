@@ -330,13 +330,21 @@ function speedColor(s: number) {
 function SpeedBlock({ hud, compact }: { hud: HudState; compact: boolean }) {
   const c = speedColor(hud.speed)
   return (
-    <div className={cn('flex flex-col items-center', compact && 'mb-1')}>
+    <div className={cn('relative flex flex-col items-center', compact && 'mb-1')}>
       <span
         className={cn('font-display leading-none tabular-nums drop-shadow-[0_3px_3px_rgba(0,0,0,0.8)]', compact ? 'text-4xl' : 'text-6xl')}
         style={{ color: c }}
       >
         {Math.round(hud.speed)}
       </span>
+      {hud.t - hud.boostAt < 900 && (
+        <span
+          key={hud.boostAt}
+          className="animate-rise absolute -mt-7 font-display text-2xl leading-none text-primary drop-shadow-[0_2px_2px_rgba(0,0,0,0.9)]"
+        >
+          +{hud.boostAmount}
+        </span>
+      )}
       <span className="text-[10px] uppercase tracking-[0.3em] text-white/70">
         m/s · best {Math.round(hud.topSpeed)}
       </span>

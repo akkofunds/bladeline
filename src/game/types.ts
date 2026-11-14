@@ -64,6 +64,8 @@ export interface HudState {
   dashReady: number // 0..1
   slashReady: number // 0..1
   hitMarker: number // timestamp of last landed hit
+  boostAt: number // timestamp of the last hook slingshot / momentum hop
+  boostAmount: number
   lastDamage: number
   damageFlash: number // timestamp of last damage taken
   locked: boolean

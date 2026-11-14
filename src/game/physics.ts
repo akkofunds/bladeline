@@ -20,8 +20,10 @@ export const MOVE = {
   boostAdd: 10,
   maxSpeed: 90,
   stepHeight: 0.65,
-  grapplePull: 38,
-  grappleRange: 90,
+  grapplePull: 58,
+  /** the rope shortens this fast while hooked, so it reels you in hard */
+  grappleReel: 9,
+  grappleRange: 110,
   half: 0.4,
   height: 1.8,
 }
@@ -124,7 +126,7 @@ export function stepBody(body: Body, input: MoveInput, dt: number, boxes: Box[],
         const radial = vel.dot(to)
         if (radial < 0) vel.addScaledVector(to, -radial)
       }
-      body.ropeLen = Math.min(body.ropeLen, dist)
+      body.ropeLen = Math.max(2, Math.min(body.ropeLen, dist) - MOVE.grappleReel * dt)
       body.onGround = false
     }
   }
