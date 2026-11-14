@@ -125,6 +125,11 @@ export function SettingsPanel({
             onChange={(volume) => update({ volume })}
           />
           <Toggle
+            label="Fullscreen when playing (needed for Ctrl slide)"
+            checked={settings.fullscreen}
+            onChange={(fullscreen) => update({ fullscreen })}
+          />
+          <Toggle
             label="Skip the map intro on startup"
             checked={settings.skipIntro}
             onChange={(skipIntro) => update({ skipIntro })}

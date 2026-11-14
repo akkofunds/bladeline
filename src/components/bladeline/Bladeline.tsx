@@ -135,6 +135,7 @@ export function Bladeline() {
     if (g) {
       g.sensitivity = settings.sens / 1000
       g.touchLookScale = settings.touchSens
+      g.fullscreenOnPlay = settings.fullscreen
       g.setVolume(settings.volume)
       g.setQuality(resolveQuality(settings.quality))
       g.setResolution(settings.resolution)

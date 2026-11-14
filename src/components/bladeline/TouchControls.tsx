@@ -123,31 +123,42 @@ export function TouchControls({
         </SmallBtn>
       </div>
 
-      {/* action cluster */}
-      <div className="pointer-events-none absolute bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] h-48 w-56">
+      {/* action cluster: Slash and Jump under the thumb, the rest in an arc above */}
+      <div className="pointer-events-none absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] h-56 w-64">
         <HoldBtn
           btn="slash"
           {...look}
-          className="bottom-16 right-0 size-20 border-primary bg-[oklch(0.65_0.22_20/0.45)]"
+          className="bottom-[4.25rem] right-0 size-20 border-primary bg-[oklch(0.65_0.22_20/0.45)]"
           ready={hud.slashReady}
           label="Slash"
         />
-        <HoldBtn btn="jump" {...look} className="bottom-0 right-20 size-[4.5rem]" ready={1} label="Jump" />
-        <ActionBtn
-          onPointerDown={(e) => {
-            e.stopPropagation()
-            game?.touchDash()
-          }}
-          className="bottom-[8.5rem] right-[5.25rem] size-14"
-          ready={hud.dashReady}
-          label="Dash"
+        <HoldBtn btn="jump" {...look} className="bottom-0 right-[5.25rem] size-[4.5rem]" ready={1} label="Jump" />
+        <HoldBtn
+          btn="slide"
+          {...look}
+          className={cn('bottom-0 right-0 size-[3.75rem] text-base', hud.sliding && 'border-accent')}
+          ready={1}
+          label="Slide"
         />
         <HoldBtn
           btn="grapple"
           {...look}
-          className={cn('bottom-[4.5rem] right-[6.25rem] size-14', hud.grappling && 'border-accent')}
+          className={cn('bottom-[5rem] right-[6rem] size-14', hud.grappling && 'border-accent')}
           ready={hud.grappleReady}
           label="Hook"
+        />
+        <TapBtn onTap={() => game?.touchDash()} className="bottom-[9.5rem] right-[5.5rem] size-14" ready={hud.dashReady} label="Dash" />
+        <TapBtn
+          onTap={() => game?.touchParry()}
+          className={cn('bottom-[9.75rem] right-0 size-14', hud.parrying && 'border-white')}
+          ready={hud.fatigued ? 0 : hud.parryReady}
+          label="Parry"
+        />
+        <TapBtn
+          onTap={() => game?.touchShoot()}
+          className="bottom-[1.5rem] right-[10.5rem] size-14 border-[#ffb02e]/70"
+          ready={hud.ammo > 0 ? 1 : 0}
+          label={`Gun ${hud.ammo}`}
         />
       </div>
     </div>
@@ -165,7 +176,7 @@ function HoldBtn({
   onLookUp,
   ...rest
 }: {
-  btn: 'jump' | 'slash' | 'grapple'
+  btn: 'jump' | 'slash' | 'grapple' | 'slide'
   game: Game | null
   onLookDown: PointerFn
   onLookMove: PointerFn
@@ -190,6 +201,30 @@ function HoldBtn({
       onPointerUp={release}
       onPointerCancel={release}
       onContextMenu={(e) => e.preventDefault()}
+    />
+  )
+}
+
+function TapBtn({
+  onTap,
+  className,
+  ready,
+  label,
+}: {
+  onTap: () => void
+  className?: string
+  ready: number
+  label: string
+}) {
+  return (
+    <ActionBtn
+      onPointerDown={(e) => {
+        e.stopPropagation()
+        onTap()
+      }}
+      className={cn('text-base', className)}
+      ready={ready}
+      label={label}
     />
   )
 }

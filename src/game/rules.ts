@@ -69,10 +69,10 @@ export const MODES: Record<MatchMode, ModeInfo> = {
   },
 }
 
-export const MAP_NAME = 'Dusk Shrine'
+export const MAP_NAME = 'Daybreak Shrine'
 /** Length of the boot flyover that shows off the map before the lobby. */
 export const INTRO_SECONDS = 7
-export const MAP_REGION = 'Kyoto Outskirts · Night'
+export const MAP_REGION = 'Kyoto Outskirts · Morning'
 
 /** Team 0 / team 1 are drawn relative to the viewer: your side is always teal, theirs red. */
 export const ALLY_COLOR = '#35e0c2'

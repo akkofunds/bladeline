@@ -17,6 +17,7 @@ export interface Settings {
   volume: number
   showFps: boolean
   skipIntro: boolean
+  fullscreen: boolean
 }
 
 export interface Stats {
@@ -38,6 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
   volume: 0.5,
   showFps: false,
   skipIntro: false,
+  fullscreen: true,
 }
 
 const EMPTY_STATS: Stats = { matches: 0, wins: 0, kills: 0, deaths: 0, topSpeed: 0 }
@@ -117,12 +119,14 @@ export function resolveTouch(c: ControlScheme) {
 
 export const DESKTOP_CONTROLS: [string, string][] = [
   ['WASD', 'Move'],
-  ['Space (hold)', 'Jump / auto bunny hop'],
-  ['A/D + mouse', 'Air strafe for speed'],
+  ['Space (hold)', 'Bhop · wallrun on walls'],
   ['Left click', 'Katana slash'],
-  ['Right click', 'Dash'],
-  ['F (hold / release)', 'Hook, let go to slingshot'],
-  ['Space while hooked', 'Jump off the hook (fling)'],
+  ['Right click (hold)', 'Hook · let go to slingshot'],
+  ['F', 'Parry (deflects bullets)'],
+  ['Q', 'Gun (ammo from sword hits)'],
+  ['Shift', 'Dash (1 stamina)'],
+  ['C / Ctrl', 'Slide · in the air: slam'],
+  ['C while hooked', 'Slingshot launch'],
   ['V', 'Third-person camera'],
   ['Enter / T', 'Chat'],
   ['Tab', 'Scoreboard'],
@@ -135,6 +139,8 @@ export const TOUCH_CONTROLS: [string, string][] = [
   ['Slash', 'Katana strike'],
   ['Dash', 'Burst forward'],
   ['Hook (hold / release)', 'Grapple, let go to slingshot'],
+  ['Slide', 'Slide · in the air: slam'],
+  ['Parry / Gun', 'Deflect / shoot (ammo from hits)'],
 ]
 
 export const MODE_ORDER: MatchMode[] = ['ffa', 'duo', 'squad', 'training']

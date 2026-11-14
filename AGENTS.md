@@ -40,6 +40,8 @@ src/
 - **Damage formula** `slashDamage(speed)` lives in `rules.ts` and is shared by the engine and HUD.
 - **Matches**: the local game (bot matches) or the host (online rooms) is authoritative for match end/restart and broadcasts `match` sync messages. The host assigns teams on join. Team colours are drawn relative to the viewer (allies teal, enemies red). No friendly fire: attackers skip allies and victims ignore hits from allies.
 - **Performance**: quality presets live in `Game.applyQuality`; `adaptResolution` lowers pixel ratio when frames run long. Keep new effects cheap (Chromebooks, phones).
+- **Combat**: parry / clash / instability / stamina / gun / slam live in `Game.ts` (constants at the top). Hits carry a kind (`slash | gun | slam | clash`) and optional instability over the network; `parry` messages stun the attacker or bounce a bullet back (`dmg`). Slide and wallrun physics live in `physics.ts` (covered by `physics.test.ts`).
+- **Input taps** (slide, jump) are latched until the next physics tick so quick taps at low FPS still register. Ctrl only counts as slide in fullscreen (keyboard lock), because Ctrl+W would close the tab.
 - **Touch**: `Game.setTouchMode(true)` makes `requestLock()` activate input without pointer lock; `TouchControls` drives `touchMove/touchLook/touchButton`.
 - The HUD is React state updated at about 15 Hz via `onHud`; per-frame visuals stay inside the engine.
 - Theme colours are in `src/styles.css` under `.dark` (the html element always has `class="dark"`).

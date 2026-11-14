@@ -101,6 +101,8 @@ export function Hud(p: HudProps) {
       )}
 
       <MatchBar hud={hud} compact={touch} />
+      <InstabilityBar hud={hud} />
+      <CombatFlash hud={hud} />
 
       {/* top-left: room + meta */}
       <div className="absolute left-[max(0.75rem,env(safe-area-inset-left))] top-[max(0.75rem,env(safe-area-inset-top))] flex max-w-[40vw] flex-wrap items-center gap-2">
@@ -176,14 +178,21 @@ export function Hud(p: HudProps) {
           touch ? 'justify-center' : 'justify-between',
         )}
       >
-        {!touch && <HealthBlock hp={hud.hp} />}
+        {!touch && (
+          <div className="flex flex-col gap-2">
+            <ResourceBlock hud={hud} />
+            <HealthBlock hp={hud.hp} streak={hud.streak} />
+          </div>
+        )}
         {touch ? (
           <div className="flex flex-col items-center gap-1">
-            <div className="flex w-36 items-center gap-2">
+            <div className="flex items-center gap-2 bg-black/50 px-2 py-1 backdrop-blur">
               <span className="font-display text-xl leading-none tabular-nums">{Math.ceil(hud.hp)}</span>
-              <div className="flex-1">
+              <div className="w-24">
                 <HealthBar hp={hud.hp} />
               </div>
+              <Pips count={hud.staminaMax} filled={hud.stamina} color="#35e0c2" />
+              <Pips count={hud.ammoMax} filled={hud.ammo} color="#ffb02e" />
             </div>
             <SpeedBlock hud={hud} compact />
           </div>
@@ -191,10 +200,13 @@ export function Hud(p: HudProps) {
           <SpeedBlock hud={hud} compact={false} />
         )}
         {!touch && (
-          <div className="flex gap-2">
+          <div className="grid grid-cols-3 gap-1.5">
             <Ability label="Slash" keyName="LMB" ready={hud.slashReady} />
-            <Ability label="Dash" keyName="RMB" ready={hud.dashReady} />
-            <Ability label="Hook" keyName="F" ready={hud.grappleReady} active={hud.grappling} />
+            <Ability label={`Gun ${hud.ammo}`} keyName="Q" ready={hud.ammo > 0 ? 1 : 0} />
+            <Ability label="Parry" keyName="F" ready={hud.fatigued ? 0 : hud.parryReady} active={hud.parrying} />
+            <Ability label="Hook" keyName="RMB" ready={hud.grappleReady} active={hud.grappling} />
+            <Ability label="Dash" keyName="Shift" ready={hud.stamina >= 1 ? 1 : hud.stamina % 1} />
+            <Ability label="Slide" keyName="C" ready={1} active={hud.sliding} />
           </div>
         )}
       </div>
@@ -305,12 +317,15 @@ function HealthBar({ hp }: { hp: number }) {
   )
 }
 
-function HealthBlock({ hp }: { hp: number }) {
+function HealthBlock({ hp, streak }: { hp: number; streak: number }) {
   return (
-    <div className="clip-panel w-56 border border-white/10 bg-black/50 p-3 backdrop-blur">
+    <div className="clip-panel w-56 border border-white/10 bg-black/60 p-3 backdrop-blur">
       <div className="flex items-baseline gap-2">
         <span className="font-display text-5xl leading-none tabular-nums">{Math.ceil(hp)}</span>
         <span className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Health</span>
+        {streak > 0 && (
+          <span className="ml-auto font-display text-xl leading-none text-primary">{streak} STREAK</span>
+        )}
       </div>
       <div className="mt-1.5">
         <HealthBar hp={hp} />
@@ -330,7 +345,7 @@ function speedColor(s: number) {
 function SpeedBlock({ hud, compact }: { hud: HudState; compact: boolean }) {
   const c = speedColor(hud.speed)
   return (
-    <div className={cn('relative flex flex-col items-center', compact && 'mb-1')}>
+    <div className={cn('relative flex flex-col items-center bg-black/45 px-4 py-1.5 backdrop-blur', compact && 'mb-1 px-3 py-1')}>
       <span
         className={cn('font-display leading-none tabular-nums drop-shadow-[0_3px_3px_rgba(0,0,0,0.8)]', compact ? 'text-4xl' : 'text-6xl')}
         style={{ color: c }}
@@ -356,12 +371,94 @@ function SpeedBlock({ hud, compact }: { hud: HudState; compact: boolean }) {
   )
 }
 
+function Pips({ count, filled, color }: { count: number; filled: number; color: string }) {
+  return (
+    <div className="flex gap-0.5">
+      {Array.from({ length: count }, (_, i) => {
+        const f = Math.max(0, Math.min(1, filled - i))
+        return (
+          <span key={i} className="relative h-2.5 w-3 overflow-hidden bg-white/15">
+            <span className="absolute inset-y-0 left-0" style={{ width: `${f * 100}%`, background: f >= 1 ? color : `${color}88` }} />
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+function ResourceBlock({ hud }: { hud: HudState }) {
+  return (
+    <div className="flex w-56 items-center justify-between gap-2 bg-black/60 px-3 py-1.5 backdrop-blur">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stamina</span>
+        <Pips count={hud.staminaMax} filled={hud.stamina} color="#35e0c2" />
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Ammo</span>
+        <Pips count={hud.ammoMax} filled={hud.ammo} color="#ffb02e" />
+      </div>
+    </div>
+  )
+}
+
+function InstabilityBar({ hud }: { hud: HudState }) {
+  if (hud.match.mode === 'training' && hud.instability <= 0) return null
+  const v = Math.max(0, Math.min(100, hud.instability))
+  const color = hud.destabilized ? '#ff2238' : v > 70 ? '#ff7a3d' : v > 40 ? '#ffd24a' : '#f2efe9'
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-[max(4.4rem,calc(env(safe-area-inset-top)+3.9rem))] w-56 -translate-x-1/2 text-center">
+      <div className="h-1.5 overflow-hidden bg-black/55">
+        <div className="h-full transition-[width] duration-150" style={{ width: `${v}%`, background: color }} />
+      </div>
+      <p
+        className={cn(
+          'mt-0.5 text-[9px] uppercase tracking-[0.3em] drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]',
+          hud.destabilized ? 'animate-blink font-semibold text-[#ff2238]' : 'text-white/70',
+        )}
+      >
+        {hud.destabilized ? 'Destabilized' : hud.fatigued ? 'Parry fatigue' : `Instability ${Math.round(v)}%`}
+      </p>
+    </div>
+  )
+}
+
+function CombatFlash({ hud }: { hud: HudState }) {
+  const now = hud.t
+  let text: string | null = null
+  let color = '#ffffff'
+  let key = 0
+  if (now - hud.parryAt < 650) {
+    text = 'PARRY'
+    key = hud.parryAt
+  } else if (now - hud.parriedAt < 750) {
+    text = 'PARRIED'
+    color = '#ff3b5c'
+    key = hud.parriedAt
+  } else if (now - hud.clashAt < 700) {
+    text = hud.clashWon ? 'CLASH WON' : 'CLASH LOST'
+    color = hud.clashWon ? '#35e0c2' : '#ff3b5c'
+    key = hud.clashAt
+  }
+  if (!text) return null
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-[38%] flex justify-center">
+      <span
+        key={key}
+        className="animate-banner font-display text-5xl tracking-[0.2em] drop-shadow-[0_3px_4px_rgba(0,0,0,0.9)]"
+        style={{ color }}
+      >
+        {text}
+      </span>
+    </div>
+  )
+}
+
 function Ability({ label, keyName, ready, active }: { label: string; keyName: string; ready: number; active?: boolean }) {
   const r = Math.max(0, Math.min(1, ready))
   return (
     <div
       className={cn(
-        'clip-btn relative w-20 overflow-hidden border bg-black/50 p-2 text-center backdrop-blur',
+        'clip-btn relative w-[4.25rem] overflow-hidden border bg-black/60 px-1.5 py-1 text-center backdrop-blur',
         active ? 'border-accent' : r >= 1 ? 'border-white/25' : 'border-white/10',
       )}
     >
@@ -369,7 +466,7 @@ function Ability({ label, keyName, ready, active }: { label: string; keyName: st
       <div className={cn('relative text-xs font-semibold uppercase tracking-wider', r >= 1 ? 'text-foreground' : 'text-muted-foreground')}>
         {label}
       </div>
-      <div className="relative mt-0.5 font-display text-xl leading-none text-accent">{keyName}</div>
+      <div className="relative mt-0.5 font-display text-lg leading-none text-accent">{keyName}</div>
     </div>
   )
 }
