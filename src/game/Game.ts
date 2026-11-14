@@ -5,7 +5,7 @@ import { Net } from './net'
 import { createBody, floorHeight, MOVE, raycastBoxes, stepBody, type Body, type BodyEvent } from './physics'
 import { Sfx } from './audio'
 import { ViewModel } from './viewmodel'
-import { buildMoon, buildSky, buildSkyline, Embers, makeBlobShadow, SUN_DIR } from './scenery'
+import { buildSky, buildSkyline, Embers, makeBlobShadow, SUN_DIR } from './scenery'
 import {
   ALLY_COLOR,
   ENEMY_COLOR,
@@ -21,7 +21,38 @@ import type { ChatLine, GameCallbacks, GameMode, HudState, MatchSync, NetMessage
 export { slashDamage }
 
 const SLASH_COOLDOWN = 0.42
-const DASH_COOLDOWN = 2.2
+const DASH_COOLDOWN = 0.3
+/** stamina bars: dash costs 1, a slide attack costs 2 */
+const STAMINA_MAX = 3
+const STAMINA_REGEN = 1.6 // seconds per bar
+const SLIDE_ATTACK_COST = 2
+const SLIDE_ATTACK_REACH = 1.8
+/** both blades swinging within this window = clash */
+const CLASH_WINDOW = 0.15
+/** gun: ammo is earned by landing sword hits */
+const AMMO_MAX = 3
+const GUN_COOLDOWN = 0.35
+const GUN_RANGE = 160
+const GUN_DAMAGE = 34
+const GUN_RECOIL = 9
+/** instability */
+const INS_PER_DAMAGE = 0.7
+const INS_HIT_REWARD = 8
+const INS_CLASH = 40
+const INS_BLOCK = 8
+const INS_PARRIED = 30
+const INS_SLAM = 45
+const INS_SLAM_REWARD = 20
+const INS_DESTABILIZE_REWARD = 30
+const INS_KILL_REWARD = 40
+const INS_DECAY = 8 // per second
+const INS_DECAY_DELAY = 2.5
+const RED_TIME = 2.5
+const RED_DAMAGE_MULT = 1.5
+const FATIGUE_TIME = 3.5
+const SLAM_SPEED = 45
+
+export type HitKind = 'slash' | 'gun' | 'slam' | 'clash'
 const GRAPPLE_COOLDOWN = 0.7
 const RESPAWN_TIME = 3
 const TRAINING_RESPAWN = 1.5
@@ -35,6 +66,15 @@ const SLING_MAX = 9
 const MOMENTUM_WINDOW = 1.8
 const MOMENTUM_HOPS = 3
 const MOMENTUM_HOP_BONUS = 1.6
+/** parry: block window, cooldown (refunded on success), and how long a parried attacker is stunned */
+const PARRY_WINDOW = 0.3
+const PARRY_COOLDOWN = 1.1
+const STUN_TIME = 0.9
+const PARRY_SPEED_BONUS = 4
+/** slam: hook the ground below you from height */
+const SLAM_RADIUS = 7
+const SLAM_DAMAGE = 45
+const SLIDE_EYE = 1.05
 const TICK = 1 / 120
 const BOT_NAMES = ['Kage', 'Sora', 'Ren', 'Hiro', 'Yumi', 'Tetsu', 'Mei', 'Akio', 'Rin', 'Daichi', 'Nami', 'Shin']
 const BOT_COLORS = ['#ff5d73', '#ffb84d', '#7dff9b', '#5dd6ff', '#c58bff', '#ff8bd8', '#f4ff6b', '#8bffef']
@@ -52,6 +92,12 @@ interface Bot {
   grappleT: number
   passive: boolean
   wander: THREE.Vector3
+  parryCD: number
+  stunT: number
+  instab: number
+  insT: number
+  redT: number
+  gunCD: number
 }
 
 interface Entity {
@@ -71,6 +117,8 @@ interface Entity {
   slashSeq: number
   slashT: number
   grapple: THREE.Vector3 | null
+  sliding?: boolean
+  instab?: number
   lastUpdate: number
   bot?: Bot
 }
@@ -122,8 +170,8 @@ export class Game {
   private camera = new THREE.PerspectiveCamera(100, 1, 0.05, 1600)
   private vmScene = new THREE.Scene()
   private vmCamera = new THREE.PerspectiveCamera(68, 1, 0.01, 10)
-  private sun = new THREE.DirectionalLight('#ffd7ad', 2.4)
-  private hemi = new THREE.HemisphereLight('#a9b4ff', '#40283a', 1.1)
+  private sun = new THREE.DirectionalLight('#fff3e2', 2.2)
+  private hemi = new THREE.HemisphereLight('#f4f8ff', '#9aa1ab', 1.5)
   private boxes: Box[]
   private spawns: THREE.Vector3[]
   private mapGroup: THREE.Group
@@ -197,6 +245,8 @@ export class Game {
   private typing = false
   private locked = false
   sensitivity = 0.0022
+  /** desktop: go fullscreen + lock the keyboard on play, so Ctrl (slide) can't trigger Ctrl+W */
+  fullscreenOnPlay = true
   touchLookScale = 1.6
   // touch input (mobile): the UI drives these through the public touch* methods
   private touchMode = false
@@ -210,6 +260,33 @@ export class Game {
   private fovKick = 0
   private boostAt = 0
   private boostAmount = 0
+  private touchSlide = false
+  private parryT = 0
+  private parryCD = 0
+  private stunT = 0
+  private parryAt = 0
+  private parriedAt = 0
+  private slamming = false
+  private shakeT = 0
+  private eyeH = EYE
+  private roll = 0
+  private shock: THREE.Mesh
+  private stamina = STAMINA_MAX
+  private ammo = 1
+  private gunCD = 0
+  private instab = 0
+  private insT = 0
+  private redT = 0
+  private fatigueT = 0
+  private slideAttack = false
+  private clashAt = 0
+  private clashWon = false
+  private tracer!: Rope
+  private tracerT = 0
+  private slideHeldPrev = false
+  /** key taps latched until the next physics tick, so a quick tap is never missed */
+  private slideTapped = false
+  private jumpTapped = false
 
   private sendT = 0
   private hudT = 0
@@ -229,7 +306,7 @@ export class Game {
       stencil: false,
     })
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.05
+    this.renderer.toneMappingExposure = 1.0
     this.renderer.autoClear = false
     container.appendChild(this.renderer.domElement)
     this.renderer.domElement.style.display = 'block'
@@ -240,8 +317,8 @@ export class Game {
     this.spawns = spawns
     this.mapGroup = buildMapMeshes(boxes, opts.quality !== 'high')
     this.scene.add(this.mapGroup)
-    this.scene.add(buildSky(), buildMoon(), buildSkyline())
-    this.scene.fog = new THREE.Fog('#a45a78', 110, 430)
+    this.scene.add(buildSky(), buildSkyline())
+    this.scene.fog = new THREE.Fog('#dde3ea', 150, 520)
     this.embers = new Embers(opts.quality === 'low' ? 120 : 360)
     this.scene.add(this.embers.points)
 
@@ -268,6 +345,16 @@ export class Game {
     this.myRope = this.makeRope()
     this.myBlob = makeBlobShadow()
     this.scene.add(this.myBlob)
+    // slam shockwave ring (reused)
+    const ringGeo = new THREE.RingGeometry(0.8, 1, 40)
+    ringGeo.rotateX(-Math.PI / 2)
+    this.shock = new THREE.Mesh(
+      ringGeo,
+      new THREE.MeshBasicMaterial({ color: '#ff3347', transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }),
+    )
+    this.shock.visible = false
+    this.scene.add(this.shock)
+    this.tracer = this.makeRope()
     this.viewModel = new ViewModel(this.info.color)
     this.vmScene.add(this.viewModel.group)
 
@@ -348,6 +435,7 @@ export class Game {
     this.clearEntities()
     this.addMenuBots()
     document.exitPointerLock?.()
+    if (document.fullscreenElement && !this.touchMode) void document.exitFullscreen?.().catch(() => {})
     this.touchActive = false
     this.clearTouch()
     this.cb.onStatus({ kind: 'idle' })
@@ -410,7 +498,7 @@ export class Game {
       this.sun.shadow.map?.dispose()
       this.sun.shadow.map = null
     }
-    this.hemi.intensity = shadows ? 1.1 : 1.35
+    this.hemi.intensity = shadows ? 1.5 : 1.75
 
     if (!initial) {
       this.scene.remove(this.mapGroup)
@@ -544,9 +632,16 @@ export class Game {
     this.mouseDY += dy * this.touchLookScale
   }
 
-  touchButton(btn: 'jump' | 'slash' | 'grapple', down: boolean) {
+  touchButton(btn: 'jump' | 'slash' | 'grapple' | 'slide', down: boolean) {
     if (!this.touchActive && down) return
-    if (btn === 'jump') this.touchJump = down
+    if (btn === 'jump') {
+      this.touchJump = down
+      if (down) this.jumpTapped = true
+    }
+    if (btn === 'slide') {
+      this.touchSlide = down
+      if (down) this.slideTapped = true
+    }
     if (btn === 'slash') {
       this.mouseDown = down
       if (down) this.trySlash()
@@ -561,6 +656,14 @@ export class Game {
     if (this.touchActive) this.tryDash()
   }
 
+  touchParry() {
+    if (this.touchActive) this.tryParry()
+  }
+
+  touchShoot() {
+    if (this.touchActive) this.tryShoot()
+  }
+
   toggleCamera() {
     this.thirdPerson = !this.thirdPerson
   }
@@ -568,6 +671,7 @@ export class Game {
   private clearTouch() {
     this.touchMoveX = this.touchMoveY = 0
     this.touchJump = false
+    this.touchSlide = false
     this.mouseDown = false
     this.releaseGrapple()
   }
@@ -578,6 +682,12 @@ export class Game {
     if (this.touchMode) {
       this.touchActive = true
       return
+    }
+    if (this.fullscreenOnPlay && !document.fullscreenElement && document.documentElement.requestFullscreen) {
+      document.documentElement
+        .requestFullscreen()
+        .then(() => (navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } }).keyboard?.lock?.())
+        .catch(() => {})
     }
     try {
       const r = this.renderer.domElement.requestPointerLock() as unknown as Promise<void> | undefined
@@ -598,7 +708,7 @@ export class Game {
 
   private onKeyDown = (e: KeyboardEvent) => {
     if (this.typing || this.mode === 'menu') return
-    if (e.code === 'Tab' || e.code === 'Space') e.preventDefault()
+    if (e.code === 'Tab' || e.code === 'Space' || e.ctrlKey) e.preventDefault()
     if (e.code === 'Enter' || e.code === 'KeyT') {
       e.preventDefault()
       this.keys.clear()
@@ -607,12 +717,16 @@ export class Game {
     }
     if (e.repeat) return
     this.keys.add(e.code)
-    if (e.code === 'KeyF') this.startGrapple()
+    if (e.code === 'KeyC' || ((e.code === 'ControlLeft' || e.code === 'ControlRight') && document.fullscreenElement))
+      this.slideTapped = true
+    if (e.code === 'Space') this.jumpTapped = true
+    if (e.code === 'KeyF' || e.code === 'KeyE') this.tryParry()
+    if (e.code === 'KeyQ') this.tryShoot()
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.tryDash()
     if (e.code === 'KeyV') this.thirdPerson = !this.thirdPerson
   }
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code)
-    if (e.code === 'KeyF') this.releaseGrapple(true)
   }
   private onMouseMove = (e: MouseEvent) => {
     if (!this.locked) return
@@ -625,10 +739,11 @@ export class Game {
       this.mouseDown = true
       this.trySlash()
     }
-    if (e.button === 2) this.tryDash()
+    if (e.button === 2) this.startGrapple()
   }
   private onMouseUp = (e: MouseEvent) => {
     if (e.button === 0) this.mouseDown = false
+    if (e.button === 2) this.releaseGrapple(true)
   }
   private onLockChange = () => {
     this.locked = document.pointerLockElement === this.renderer.domElement
@@ -745,6 +860,10 @@ export class Game {
     ;(blob.material as THREE.MeshBasicMaterial).opacity = s
   }
 
+  private eyePos() {
+    return this.body.pos.clone().add(new THREE.Vector3(0, this.eyeH, 0))
+  }
+
   private lookDir(yaw = this.yaw, pitch = this.pitch) {
     return new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch))
   }
@@ -759,6 +878,10 @@ export class Game {
       others.push(e.pos)
     }
     if (this.mode !== 'menu' && this.alive && !(teams && this.info.team === team)) others.push(this.body.pos)
+    // everyone alive (allies too) blocks a spawn point so nobody spawns inside someone else
+    const occupied: THREE.Vector3[] = []
+    for (const e of this.entities.values()) if (e.alive) occupied.push(e.pos)
+    if (this.mode !== 'menu' && this.alive) occupied.push(this.body.pos)
     let best = this.spawns[0]
     let bestScore = -Infinity
     for (const s of this.spawns) {
@@ -768,13 +891,19 @@ export class Game {
         d = Infinity
         for (const o of others) d = Math.min(d, o.distanceTo(s))
       }
-      const score = d + Math.random() * 25
+      let crowd = 0
+      for (const o of occupied) if (Math.hypot(o.x - s.x, o.z - s.z) < 6) crowd++
+      const score = d + Math.random() * 25 - crowd * 500
       if (score > bestScore) {
         bestScore = score
         best = s
       }
     }
     const p = best.clone()
+    // small jitter so teammates sharing a spawn area don't stack (only onto open ground)
+    const jx = p.x + (Math.random() - 0.5) * 6
+    const jz = p.z + (Math.random() - 0.5) * 6
+    if (floorHeight(jx, jz, this.boxes) < 0.2) p.set(jx, 0, jz)
     p.y = floorHeight(p.x, p.z, this.boxes) + 0.02
     return p
   }
@@ -880,6 +1009,12 @@ export class Game {
       grappleT: 0,
       passive: !!opts.passive,
       wander: pos.clone(),
+      parryCD: 0,
+      stunT: 0,
+      instab: 0,
+      insT: 0,
+      redT: 0,
+      gunCD: 2 + Math.random() * 3,
     }
     this.entities.set(id, e)
   }
@@ -1088,13 +1223,24 @@ export class Game {
         }
         e.slashSeq = msg.slash
         e.grapple = msg.g ? new THREE.Vector3(...msg.g) : null
+        e.sliding = !!msg.sl
+        e.instab = msg.in ?? 0
         e.lastUpdate = this.now
         break
       }
+      case 'parry':
+        if (msg.to === this.myId) this.getParried(msg.from, Math.min(100, Math.max(0, msg.dmg ?? 0)))
+        break
       case 'hit':
         if (msg.to !== this.myId || this.phase !== 'live') break
         if (this.allies(msg.from, this.myId)) break // no friendly fire
-        this.takeDamage(Math.min(100, Math.max(0, msg.dmg)), msg.from, new THREE.Vector3(...msg.kb).clampLength(0, 40))
+        this.takeDamage(
+          Math.min(100, Math.max(0, msg.dmg)),
+          msg.from,
+          new THREE.Vector3(...msg.kb).clampLength(0, 60),
+          msg.k ?? 'slash',
+          Math.min(60, Math.max(0, msg.ins ?? 0)),
+        )
         break
       case 'death':
         this.registerDeath(msg.id, msg.by, msg.speed)
@@ -1130,6 +1276,8 @@ export class Game {
       hp: Math.max(0, Math.round(this.hp)),
       slash: this.slashSeq,
       g: b.grapple ? [r(b.grapple.x), r(b.grapple.y), r(b.grapple.z)] : null,
+      sl: b.sliding || undefined,
+      in: Math.round(this.instab),
     })
   }
 
@@ -1172,6 +1320,7 @@ export class Game {
       })
     }
     if (isMe(killerId) && victimId !== killerId) {
+      this.addInstability(-INS_KILL_REWARD)
       this.sfx.kill()
       this.streak++
     }
@@ -1189,20 +1338,23 @@ export class Game {
   }
 
   private trySlash() {
-    if (!this.alive || this.slashCD > 0 || !this.canFight()) return
+    if (!this.alive || this.slashCD > 0 || this.stunT > 0 || this.redT > 0 || !this.canFight()) return
     this.slashCD = SLASH_COOLDOWN
     this.slashSeq++
     const side = this.slashSeq % 2 ? 1 : -1
     this.viewModel.slash(side)
     this.sfx.slash()
+    // slide attack: longer reach, costs two stamina bars
+    this.slideAttack = this.body.sliding && this.stamina >= SLIDE_ATTACK_COST
+    if (this.slideAttack) this.stamina -= SLIDE_ATTACK_COST
     this.pendingHit = 0.08
   }
 
   private resolveMySlash() {
-    const eye = this.body.pos.clone().add(new THREE.Vector3(0, EYE, 0))
+    const eye = this.eyePos()
     const look = this.lookDir()
     const speed = this.body.vel.length()
-    const reach = 3.3 + Math.min(1.6, speed * 0.035)
+    const reach = 3.3 + Math.min(2.5, speed * 0.035) + (this.slideAttack ? SLIDE_ATTACK_REACH : 0)
     const dmg = slashDamage(speed)
     let landed = false
     for (const e of this.entities.values()) {
@@ -1216,44 +1368,161 @@ export class Game {
       // walls block slashes
       const wall = raycastBoxes(eye, to, dist, this.boxes)
       if (wall && wall.t < dist - 0.6) continue
-      const kb = look.clone().setY(0).normalize().multiplyScalar(7).add(new THREE.Vector3(0, 4, 0))
+      // CLASH: they're mid-swing too. The faster blade wins.
+      if (e.slashT >= 0 && e.slashT < CLASH_WINDOW) {
+        this.clash(e, speed)
+        continue
+      }
+      // knockback grows with your speed
+      const kb = look.clone().setY(0).normalize().multiplyScalar(7 + speed * 0.12).add(new THREE.Vector3(0, 4, 0))
       kb.addScaledVector(this.body.vel, 0.25)
-      this.applyHit(this.myId, e, dmg, kb)
+      this.applyHit(this.myId, e, dmg, kb, 'slash')
       landed = true
     }
     if (landed) {
       this.hitMarker = performance.now()
       this.lastDamage = dmg
       this.sfx.hit()
+      this.ammo = Math.min(AMMO_MAX, this.ammo + 1)
+      this.addInstability(-INS_HIT_REWARD)
     }
   }
 
-  private applyHit(fromId: string, victim: Entity, dmg: number, kb: THREE.Vector3) {
-    this.spark(victim.pos.clone().add(new THREE.Vector3(0, 1.2, 0)), '#ff3b5c', 16, 8)
-    if (victim.bot) {
-      victim.hp -= dmg
-      victim.bot.body.vel.add(kb)
-      victim.bot.body.onGround = false
+  private clash(e: Entity, mySpeed: number) {
+    const theirSpeed = e.bot ? e.bot.body.vel.length() : e.vel.length()
+    const mid = this.body.pos.clone().lerp(e.pos, 0.5).add(new THREE.Vector3(0, 1.3, 0))
+    this.spark(mid, '#ffffff', 22, 9)
+    this.sfx.tone(3000, 2200, 0.2, 0.3, 'square')
+    this.clashAt = performance.now()
+    const away = new THREE.Vector3().subVectors(e.pos, this.body.pos).setY(0).normalize()
+    if (mySpeed >= theirSpeed) {
+      this.clashWon = true
+      const kb = away.clone().multiplyScalar(10 + mySpeed * 0.15).add(new THREE.Vector3(0, 4, 0))
+      this.applyHit(this.myId, e, 0, kb, 'clash', INS_CLASH)
+    } else {
+      this.clashWon = false
+      this.body.vel.addScaledVector(away, -(10 + theirSpeed * 0.15)).add(new THREE.Vector3(0, 4, 0))
+      this.body.onGround = false
+      this.addInstability(INS_CLASH)
+    }
+  }
+
+  private tryShoot() {
+    if (!this.alive || this.ammo <= 0 || this.gunCD > 0 || this.stunT > 0 || this.redT > 0 || !this.canFight()) return
+    this.ammo--
+    this.gunCD = GUN_COOLDOWN
+    const eye = this.eyePos()
+    const look = this.lookDir()
+    const wall = raycastBoxes(eye, look, GUN_RANGE, this.boxes)
+    let end = wall ? wall.t : GUN_RANGE
+    let target: Entity | null = null
+    for (const e of this.entities.values()) {
+      if (!e.alive || this.allies(this.myId, e.id)) continue
+      // ray vs a sphere around the chest, generous for fast targets
+      const c = e.pos.clone().add(new THREE.Vector3(0, 1.1, 0)).sub(eye)
+      const t = c.dot(look)
+      if (t < 0 || t > end) continue
+      if (c.lengthSq() - t * t > 0.95 * 0.95) continue
+      end = t
+      target = e
+    }
+    const hitPoint = eye.clone().addScaledVector(look, end)
+    this.showTracer(this.eyePos().add(new THREE.Vector3(-0.3, -0.3, 0).applyEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'))), hitPoint)
+    if (target) {
+      const kb = look.clone().multiplyScalar(6).add(new THREE.Vector3(0, 2, 0))
+      this.applyHit(this.myId, target, GUN_DAMAGE, kb, 'gun')
+      this.hitMarker = performance.now()
+      this.lastDamage = GUN_DAMAGE
+    }
+    // recoil: kicks you backward, which you can use to change direction in the air
+    this.body.vel.addScaledVector(look, -GUN_RECOIL)
+    if (look.y < -0.3) this.body.onGround = false
+    this.shakeT = Math.max(this.shakeT, 0.12)
+    this.sfx.tone(1400, 120, 0.18, 0.35, 'sawtooth')
+  }
+
+  private showTracer(from: THREE.Vector3, to: THREE.Vector3) {
+    this.placeRope(this.tracer, from, to, 0.5)
+    this.tracerT = 0.12
+  }
+
+  private applyHit(fromId: string, victim: Entity, dmg: number, kb: THREE.Vector3, kind: HitKind, ins = 0) {
+    const b = victim.bot
+    const fromMe = fromId === this.myId
+    // sparring bots read your attacks and sometimes parry them (bullets go back at you)
+    if (b && !b.passive && fromMe && b.parryCD <= 0 && b.redT <= 0 && kind !== 'clash') {
+      const chance = kind === 'gun' ? 0.12 : kind === 'slam' ? 0.1 : 0.18
+      if (Math.random() < chance) {
+        b.parryCD = 3
+        this.spark(victim.pos.clone().add(new THREE.Vector3(0, 1.3, 0)), '#ffffff', 14, 6)
+        if (kind === 'gun') this.takeDamage(GUN_DAMAGE, victim.id, kb.clone().negate(), 'gun', 0, true)
+        else this.getParried(victim.id)
+        return
+      }
+    }
+    if (dmg > 0) this.spark(victim.pos.clone().add(new THREE.Vector3(0, 1.2, 0)), '#ff3b5c', 16, 8)
+    if (b) {
+      const red = b.redT > 0
+      const total = Math.round(dmg * (red ? RED_DAMAGE_MULT : 1))
+      victim.hp -= total
+      b.body.vel.add(kb)
+      b.body.onGround = false
+      this.botInstability(victim, ins || total * INS_PER_DAMAGE)
       if (victim.hp <= 0 && victim.alive) {
         victim.alive = false
-        victim.bot.respawnAt = this.now + (victim.bot.passive ? TRAINING_RESPAWN : RESPAWN_TIME)
-        victim.bot.body.grapple = null
-        const atk = fromId === this.myId ? this.body.vel : (this.entities.get(fromId)?.vel ?? new THREE.Vector3())
+        b.respawnAt = this.now + (b.passive ? TRAINING_RESPAWN : RESPAWN_TIME)
+        b.body.grapple = null
+        b.instab = 0
+        b.redT = 0
+        const atk = fromMe ? this.body.vel : (this.entities.get(fromId)?.vel ?? new THREE.Vector3())
         this.registerDeath(victim.id, fromId, atk.length())
       }
     } else if (this.net) {
-      this.net.send({ t: 'hit', from: this.myId, to: victim.id, dmg, kb: [kb.x, kb.y, kb.z] })
+      this.net.send({ t: 'hit', from: this.myId, to: victim.id, dmg, kb: [kb.x, kb.y, kb.z], k: kind, ins })
     }
   }
 
-  private takeDamage(dmg: number, fromId: string, kb: THREE.Vector3) {
+  private botInstability(e: Entity, amount: number) {
+    const b = e.bot!
+    if (b.passive || b.redT > 0) return
+    b.instab = Math.min(100, b.instab + amount)
+    b.insT = 0
+    if (b.instab >= 100) {
+      b.redT = RED_TIME
+      this.spark(e.pos.clone().add(new THREE.Vector3(0, 1.8, 0)), '#ff2238', 20, 5)
+      this.sfx.tone(500, 200, 0.3, 0.25, 'square')
+      this.addInstability(-INS_DESTABILIZE_REWARD)
+    }
+  }
+
+  private addInstability(amount: number) {
+    if (amount > 0) {
+      if (this.redT > 0) return
+      this.instab = Math.min(100, this.instab + amount)
+      this.insT = 0
+      if (this.instab >= 100) {
+        this.redT = RED_TIME
+        this.sfx.tone(300, 90, 0.5, 0.35, 'sawtooth')
+      }
+    } else this.instab = Math.max(0, this.instab + amount)
+  }
+
+  private takeDamage(dmg: number, fromId: string, kb: THREE.Vector3, kind: HitKind = 'slash', ins = 0, deflected = false) {
     if (!this.alive) return
-    this.hp -= dmg
-    this.damageFlash = performance.now()
+    if (this.parryT > 0 && fromId !== this.myId && !deflected) {
+      this.parrySuccess(fromId, kind, dmg)
+      return
+    }
+    const total = Math.round(dmg * (this.redT > 0 ? RED_DAMAGE_MULT : 1))
+    if (total > 0) {
+      this.hp -= total
+      this.damageFlash = performance.now()
+      this.sfx.hurt()
+      this.spark(this.body.pos.clone().add(new THREE.Vector3(0, 1.2, 0)), '#ff3b5c', 10, 6)
+    }
     this.body.vel.add(kb)
     this.body.onGround = false
-    this.sfx.hurt()
-    this.spark(this.body.pos.clone().add(new THREE.Vector3(0, 1.2, 0)), '#ff3b5c', 10, 6)
+    if (fromId !== this.myId) this.addInstability(ins || total * INS_PER_DAMAGE)
     if (this.hp <= 0) {
       this.alive = false
       this.hp = 0
@@ -1269,6 +1538,12 @@ export class Game {
 
   private respawn() {
     this.body = createBody(this.pickSpawn(this.info.team))
+    this.slamming = false
+    this.stunT = this.parryT = 0
+    this.instab = 0
+    this.redT = 0
+    this.fatigueT = 0
+    this.stamina = STAMINA_MAX
     this.hp = 100
     this.alive = true
     this.lastKiller = null
@@ -1278,38 +1553,187 @@ export class Game {
   }
 
   private tryDash() {
-    if (!this.alive || this.dashCD > 0 || this.mode === 'menu' || this.phase === 'countdown') return
+    if (!this.alive || this.stamina < 1 || this.dashCD > 0 || this.mode === 'menu' || this.phase === 'countdown') return
+    this.stamina -= 1
     this.dashCD = DASH_COOLDOWN
-    const d = this.lookDir()
-    const flat = new THREE.Vector3(d.x, 0, d.z).normalize()
-    this.body.vel.addScaledVector(flat, 11)
+    // dash goes where you're steering (or where you look if you're not pressing anything)
+    const k = this.keys
+    const f = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0) + this.touchMoveY
+    const s = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0) + this.touchMoveX
+    const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw))
+    const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
+    const dir = fwd.multiplyScalar(f).addScaledVector(right, s)
+    if (dir.lengthSq() < 0.01) dir.copy(this.lookDir()).setY(0)
+    dir.normalize()
+    this.body.vel.addScaledVector(dir, 11)
     this.body.vel.y = Math.max(this.body.vel.y, 3.5)
     this.body.onGround = false
+    this.fovKick = Math.max(this.fovKick, 5)
     this.sfx.boost()
+  }
+
+  private tryParry() {
+    if (!this.alive || this.parryCD > 0 || this.fatigueT > 0 || !this.canFight()) return
+    if (this.redT > 0) {
+      // parrying while destabilized: parry fatigue locks you out
+      this.fatigueT = FATIGUE_TIME
+      this.sfx.tone(200, 120, 0.3, 0.25, 'square')
+      return
+    }
+    this.parryT = PARRY_WINDOW
+    this.parryCD = PARRY_COOLDOWN
+    this.viewModel.parry()
+    this.sfx.tone(900, 1300, 0.08, 0.12, 'triangle')
+  }
+
+  /** You blocked a hit: no damage, cooldowns refunded, a burst of speed. Melee attackers are stunned; bullets fly back. */
+  private parrySuccess(attackerId: string, kind: HitKind, dmg: number) {
+    this.parryT = 0
+    this.parryCD = 0
+    this.slashCD = 0
+    this.parryAt = performance.now()
+    this.addInstability(INS_BLOCK)
+    const look = this.lookDir().setY(0).normalize()
+    this.body.vel.addScaledVector(look, PARRY_SPEED_BONUS)
+    this.flashBoost(PARRY_SPEED_BONUS)
+    this.spark(this.eyePos().addScaledVector(this.lookDir(), 0.8), '#ffffff', 18, 7)
+    this.sfx.tone(2600, 1700, 0.18, 0.35, 'square')
+    this.sfx.hit()
+    const atk = this.entities.get(attackerId)
+    if (!atk) return
+    if (atk.bot) {
+      if (kind === 'gun') {
+        // deflect the bullet straight back
+        this.showTracer(this.eyePos(), atk.pos.clone().add(new THREE.Vector3(0, 1.1, 0)))
+        const kb = new THREE.Vector3().subVectors(atk.pos, this.body.pos).setY(0).normalize().multiplyScalar(6)
+        this.applyHit(this.myId, atk, dmg || GUN_DAMAGE, kb, 'clash')
+        return
+      }
+      atk.bot.stunT = STUN_TIME
+      atk.bot.slashCD = Math.max(atk.bot.slashCD, STUN_TIME + 0.3)
+      this.botInstability(atk, INS_PARRIED)
+      const away = new THREE.Vector3().subVectors(atk.pos, this.body.pos).setY(0).normalize()
+      atk.bot.body.vel.addScaledVector(away, 9).add(new THREE.Vector3(0, 4, 0))
+      atk.bot.body.onGround = false
+    } else if (this.net) {
+      this.net.send({ t: 'parry', from: this.myId, to: attackerId, dmg: kind === 'gun' ? dmg || GUN_DAMAGE : 0 })
+    }
+  }
+
+  /** Your attack was parried: stunned and knocked back (or eat your own deflected bullet). */
+  private getParried(byId: string, deflectDmg = 0) {
+    if (deflectDmg > 0) {
+      const by = this.entities.get(byId)
+      const kb = by ? new THREE.Vector3().subVectors(this.body.pos, by.pos).setY(0).normalize().multiplyScalar(6) : new THREE.Vector3()
+      this.takeDamage(Math.min(100, deflectDmg), byId, kb, 'gun', 0, true)
+      return
+    }
+    this.stunT = STUN_TIME
+    this.slashCD = Math.max(this.slashCD, STUN_TIME)
+    this.pendingHit = -1
+    this.parriedAt = performance.now()
+    this.addInstability(INS_PARRIED)
+    const by = this.entities.get(byId)
+    if (by) {
+      const away = new THREE.Vector3().subVectors(this.body.pos, by.pos).setY(0).normalize()
+      this.body.vel.addScaledVector(away, 8).add(new THREE.Vector3(0, 4, 0))
+      this.body.onGround = false
+    }
+    this.shakeT = 0.25
+    this.sfx.tone(1800, 600, 0.25, 0.3, 'square')
+  }
+
+  /** Slide pressed in the air: drive straight down into a ground slam (unless you're about to land anyway). */
+  private tryAirSlam() {
+    if (!this.alive || this.slamming || this.redT > 0 || !this.canFight()) return false
+    const below = raycastBoxes(this.body.pos.clone().add(new THREE.Vector3(0, 0.1, 0)), DOWN, 200, this.boxes)
+    if (below && below.t < 3) return false
+    this.slamming = true
+    this.body.vel.x *= 0.5
+    this.body.vel.z *= 0.5
+    this.body.vel.y = -SLAM_SPEED
+    this.fovKick = 10
+    this.sfx.tone(600, 200, 0.2, 0.2, 'sawtooth')
+    return true
+  }
+
+  private slamImpact() {
+    this.slamming = false
+    const at = this.body.pos
+    let landed = false
+    for (const e of this.entities.values()) {
+      if (!e.alive || this.allies(this.myId, e.id)) continue
+      const dx = e.pos.x - at.x
+      const dz = e.pos.z - at.z
+      const d = Math.hypot(dx, dz)
+      if (d > SLAM_RADIUS || Math.abs(e.pos.y - at.y) > 4) continue
+      const kb = new THREE.Vector3(dx, 0, dz).normalize().multiplyScalar(10).add(new THREE.Vector3(0, 9, 0))
+      this.applyHit(this.myId, e, SLAM_DAMAGE, kb, 'slam', INS_SLAM)
+      landed = true
+    }
+    if (landed) {
+      this.hitMarker = performance.now()
+      this.lastDamage = SLAM_DAMAGE
+      this.sfx.hit()
+      this.addInstability(-INS_SLAM_REWARD)
+    }
+    this.shock.position.set(at.x, at.y + 0.08, at.z)
+    this.shock.visible = true
+    this.shock.userData.t = 0
+    this.spark(at.clone().add(new THREE.Vector3(0, 0.3, 0)), '#ff3347', 24, 10)
+    this.shakeT = 0.35
+    this.sfx.tone(160, 40, 0.45, 0.5, 'sawtooth')
   }
 
   private startGrapple() {
     if (!this.alive || this.grappleCD > 0 || this.body.grapple || this.mode === 'menu' || this.phase === 'countdown')
       return
     this.grappleHeld = true
-    const eye = this.body.pos.clone().add(new THREE.Vector3(0, EYE, 0))
+    const eye = this.eyePos()
     const hit = raycastBoxes(eye, this.lookDir(), MOVE.grappleRange, this.boxes)
     if (!hit) {
       this.grappleCD = 0.25
       this.sfx.tone(500, 300, 0.1, 0.1)
       return
     }
+    const dir = new THREE.Vector3().subVectors(hit.point, eye).normalize()
     this.body.grapple = hit.point.clone().addScaledVector(hit.normal, 0.05)
     this.body.ropeLen = hit.t
-    // slow? the hook yanks you up to speed
-    const sp = this.speedH(this.body.vel)
-    if (sp < 16) {
-      const dir = new THREE.Vector3().subVectors(hit.point, eye).normalize()
-      this.body.vel.addScaledVector(dir, Math.min(10, 16 - sp + 3))
+    const k = this.keys
+    const moving =
+      k.has('KeyW') || k.has('KeyA') || k.has('KeyS') || k.has('KeyD') || Math.hypot(this.touchMoveX, this.touchMoveY) > 0.2
+    const sp = this.body.vel.length()
+    if (!moving && sp > 8) {
+      // REDIRECT: no movement keys held, so all your momentum swings toward the hook
+      this.body.vel.copy(dir).multiplyScalar(sp)
+    } else if (this.speedH(this.body.vel) < 16) {
+      // slow? the hook yanks you up to speed
+      const h = this.speedH(this.body.vel)
+      this.body.vel.addScaledVector(dir, Math.min(10, 16 - h + 3))
     }
     this.fovKick = 6
     this.spark(this.body.grapple, '#ff3347', 10, 5)
     this.sfx.grapple()
+  }
+
+  /**
+   * SLINGSHOT: hooked toward the ground and you hit slide: let go and turn all that speed
+   * forward along the ground, plus a bonus.
+   */
+  private slingshotLaunch() {
+    if (!this.body.grapple) return
+    const sp = this.body.vel.length()
+    this.grappleHeld = false
+    this.body.grapple = null
+    this.grappleCD = GRAPPLE_COOLDOWN
+    const fwd = this.lookDir().setY(0).normalize()
+    const out = sp * 1.05 + SLING_BASE
+    this.body.vel.set(fwd.x * out, Math.max(2, this.body.vel.y * 0.2), fwd.z * out)
+    this.momentumT = MOMENTUM_WINDOW
+    this.momentumHops = MOMENTUM_HOPS
+    this.fovKick = 10
+    this.flashBoost(Math.max(0, out - sp))
+    this.sfx.boost()
   }
 
   /**
@@ -1368,6 +1792,14 @@ export class Game {
     let dist = 999
     let jump = false
     if (!frozen) {
+      bot.parryCD -= dt
+      bot.stunT -= dt
+      bot.gunCD -= dt
+      bot.insT += dt
+      if (bot.redT > 0) {
+        bot.redT -= dt
+        if (bot.redT <= 0) bot.instab = 50
+      } else if (bot.insT > INS_DECAY_DELAY) bot.instab = Math.max(0, bot.instab - INS_DECAY * dt)
       bot.thinkT -= dt
       bot.slashCD -= dt
       bot.grappleT -= dt
@@ -1422,7 +1854,33 @@ export class Game {
               bot.grappleT = 1.2
             }
           }
-          if (fighting && dist < 3.2 && bot.slashCD <= 0) {
+          // ranged pressure: snap shots at targets in the open
+          if (fighting && bot.redT <= 0 && bot.stunT <= 0 && bot.gunCD <= 0 && dist > 10 && dist < 60) {
+            bot.gunCD = 3 + Math.random() * 3
+            const eye = e.pos.clone().add(new THREE.Vector3(0, EYE, 0))
+            const aim = target.pos.clone().add(new THREE.Vector3(0, 1.1, 0))
+            const dirTo = aim.clone().sub(eye)
+            const len = dirTo.length()
+            const blocked = raycastBoxes(eye, dirTo.normalize(), len, this.boxes)
+            if (!blocked || blocked.t > len - 0.5) {
+              const hits = Math.random() < 0.45
+              const end = hits ? aim : aim.clone().add(new THREE.Vector3(Math.random() * 4 - 2, Math.random() * 2, Math.random() * 4 - 2))
+              if (e.pos.distanceTo(this.body.pos) < 70 && this.mode !== 'menu') {
+                this.showTracer(eye, end)
+                this.sfx.tone(1200, 150, 0.15, 0.15, 'sawtooth')
+              }
+              if (hits) {
+                const kb = dirTo.clone().multiplyScalar(5).add(new THREE.Vector3(0, 2, 0))
+                const dmg = Math.round(GUN_DAMAGE * 0.7)
+                if (target.id === this.myId) this.takeDamage(dmg, e.id, kb, 'gun')
+                else {
+                  const victim = this.entities.get(target.id)
+                  if (victim) this.applyHit(e.id, victim, dmg, kb, 'gun')
+                }
+              }
+            }
+          }
+          if (fighting && dist < 3.2 && bot.slashCD <= 0 && bot.stunT <= 0 && bot.redT <= 0) {
             bot.slashCD = 0.75 + Math.random() * 0.5
             e.slashSeq++
             e.slashT = 0
@@ -1433,7 +1891,7 @@ export class Game {
               if (target.id === this.myId) this.takeDamage(dmg, e.id, kb)
               else {
                 const victim = this.entities.get(target.id)
-                if (victim) this.applyHit(e.id, victim, dmg, kb)
+                if (victim) this.applyHit(e.id, victim, dmg, kb, 'slash')
               }
             }
           }
@@ -1509,6 +1967,17 @@ export class Game {
       this.slashCD = Math.max(0, this.slashCD - dt)
       this.dashCD = Math.max(0, this.dashCD - dt)
       this.grappleCD = Math.max(0, this.grappleCD - dt)
+      this.parryT = Math.max(0, this.parryT - dt)
+      this.parryCD = Math.max(0, this.parryCD - dt)
+      this.stunT = Math.max(0, this.stunT - dt)
+      this.gunCD = Math.max(0, this.gunCD - dt)
+      this.fatigueT = Math.max(0, this.fatigueT - dt)
+      this.stamina = Math.min(STAMINA_MAX, this.stamina + dt / STAMINA_REGEN)
+      this.insT += dt
+      if (this.redT > 0) {
+        this.redT -= dt
+        if (this.redT <= 0) this.instab = 50 // recovered, but still shaky
+      } else if (this.insT > INS_DECAY_DELAY) this.instab = Math.max(0, this.instab - INS_DECAY * dt)
       if (this.pendingHit >= 0) {
         this.pendingHit -= dt
         if (this.pendingHit < 0) this.resolveMySlash()
@@ -1529,13 +1998,35 @@ export class Game {
         const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
         const wish = fwd.multiplyScalar(f).addScaledVector(right, s)
         const jump = !frozen && (k.has('Space') || (this.touchActive && this.touchJump))
+        let jumpPressed = !frozen && ((jump && !this.jumpHeldPrev) || this.jumpTapped)
+        this.jumpTapped = false
         // tap jump while hooked: jump off the rope with a fling
-        if (jump && !this.jumpHeldPrev && this.body.grapple) this.releaseGrapple(true, true)
+        if (jumpPressed && this.body.grapple) {
+          this.releaseGrapple(true, true)
+          jumpPressed = false
+        }
         this.jumpHeldPrev = jump
         this.momentumT = Math.max(0, this.momentumT - dt)
+        // Ctrl only counts in fullscreen, where the game can capture Ctrl+W; C always works
+        const ctrl = (k.has('ControlLeft') || k.has('ControlRight')) && !!document.fullscreenElement
+        const slide = !frozen && (k.has('KeyC') || ctrl || (this.touchActive && this.touchSlide))
+        const slidePressed = !frozen && ((slide && !this.slideHeldPrev) || this.slideTapped)
+        this.slideHeldPrev = slide
+        this.slideTapped = false
+        if (slidePressed && !this.body.onGround) {
+          if (this.body.grapple) this.slingshotLaunch()
+          else this.tryAirSlam()
+        }
         const events: BodyEvent[] = []
-        stepBody(this.body, { wish, jump }, dt, this.boxes, events)
+        stepBody(this.body, { wish, jump: jump || jumpPressed, jumpPressed, slide }, dt, this.boxes, events)
         for (const ev of events) {
+          if (ev === 'land' && this.slamming) this.slamImpact()
+          if (ev === 'slide') this.sfx.slash(0.25)
+          if (ev === 'wallrun') this.sfx.tone(300, 520, 0.12, 0.08, 'triangle')
+          if (ev === 'walljump') {
+            this.sfx.boost()
+            this.flashBoost(MOVE.wallJumpBonus)
+          }
           if (ev === 'jump' && this.momentumT > 0 && this.momentumHops > 0) {
             // carried momentum: each hop right after a hook adds speed
             const v = this.body.vel
@@ -1608,8 +2099,9 @@ export class Game {
         slashSide: e.slashSeq % 2 ? 1 : -1,
         grappling: !!e.grapple,
         alive: e.alive,
+        sliding: e.sliding,
       })
-      e.avatar.drawLabel(e.hp)
+      e.avatar.drawLabel(e.hp, e.bot ? e.bot.redT > 0 : (e.instab ?? 0) >= 100)
       const hand = e.pos.clone().add(new THREE.Vector3(0, 1.4, 0))
       this.placeRope(e.rope, hand, e.alive ? e.grapple : null)
       this.placeBlob(e.blob, e.pos, e.alive)
@@ -1633,6 +2125,17 @@ export class Game {
       }
     }
     this.embers.update(t, this.renderer.domElement.height)
+    if (this.tracerT > 0) {
+      this.tracerT -= dt
+      if (this.tracerT <= 0) this.placeRope(this.tracer, this.body.pos, null)
+    }
+    if (this.shock.visible) {
+      const st = (this.shock.userData.t = (this.shock.userData.t as number) + dt)
+      const k = st / 0.45
+      this.shock.scale.setScalar(1 + k * SLAM_RADIUS)
+      ;(this.shock.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.8 * (1 - k))
+      if (k >= 1) this.shock.visible = false
+    }
 
     if (this.mode === 'menu') {
       this.updateMenuCamera(dt)
@@ -1658,12 +2161,14 @@ export class Game {
       slashSide: this.slashSeq % 2 ? 1 : -1,
       grappling: !!this.body.grapple,
       alive: this.alive,
+      sliding: this.body.sliding,
     })
     const showSelf = this.thirdPerson || !this.alive
     this.myAvatar.root.visible = showSelf
     this.placeBlob(this.myBlob, this.body.pos, showSelf)
 
-    const eye = this.body.pos.clone().add(new THREE.Vector3(0, EYE, 0))
+    this.eyeH += ((this.body.sliding ? SLIDE_EYE : EYE) - this.eyeH) * Math.min(1, dt * 14)
+    const eye = this.eyePos()
     const look = this.lookDir()
     if (!this.alive) {
       // death cam orbits your body and looks at the killer if visible
@@ -1685,10 +2190,20 @@ export class Game {
       this.camera.rotation.order = 'YXZ'
       this.camera.rotation.y = this.yaw
       this.camera.rotation.x = this.pitch
-      // subtle roll when strafing
+      // subtle roll when strafing, a stronger lean away from the wall when wallrunning
       const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
       const lateral = this.body.vel.dot(right)
-      this.camera.rotation.z = THREE.MathUtils.clamp(-lateral * 0.003, -0.04, 0.04)
+      const target = this.body.wallrun
+        ? this.body.wallNormal.dot(right) * -0.14
+        : THREE.MathUtils.clamp(-lateral * 0.003, -0.04, 0.04)
+      this.roll += (target - this.roll) * Math.min(1, dt * 8)
+      this.camera.rotation.z = this.roll
+    }
+    if (this.shakeT > 0) {
+      this.shakeT = Math.max(0, this.shakeT - dt)
+      const a = this.shakeT * 0.6
+      this.camera.position.x += (Math.random() - 0.5) * a
+      this.camera.position.y += (Math.random() - 0.5) * a
     }
     this.fovKick = Math.max(0, this.fovKick - dt * 20)
     const targetFov = 98 + THREE.MathUtils.clamp((this.body.vel.length() - 10) * 0.45, 0, 22) + this.fovKick
@@ -1727,11 +2242,27 @@ export class Game {
       respawnIn: Math.max(0, this.respawnAt - this.now),
       grappleReady: this.body.grapple ? 1 : 1 - this.grappleCD / GRAPPLE_COOLDOWN,
       grappling: !!this.body.grapple,
-      dashReady: 1 - this.dashCD / DASH_COOLDOWN,
+      dashReady: Math.min(1, this.stamina),
       slashReady: 1 - this.slashCD / SLASH_COOLDOWN,
       hitMarker: this.hitMarker,
       boostAt: this.boostAt,
       boostAmount: this.boostAmount,
+      parryReady: 1 - this.parryCD / PARRY_COOLDOWN,
+      parrying: this.parryT > 0,
+      parryAt: this.parryAt,
+      parriedAt: this.parriedAt,
+      stunned: this.stunT > 0,
+      stamina: this.stamina,
+      staminaMax: STAMINA_MAX,
+      ammo: this.ammo,
+      ammoMax: AMMO_MAX,
+      instability: this.instab,
+      destabilized: this.redT > 0,
+      fatigued: this.fatigueT > 0,
+      clashAt: this.clashAt,
+      clashWon: this.clashWon,
+      sliding: this.body.sliding,
+      wallrun: this.body.wallrun,
       lastDamage: this.lastDamage,
       damageFlash: this.damageFlash,
       locked: this.locked || this.touchActive,

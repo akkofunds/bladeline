@@ -10,6 +10,7 @@ export class ViewModel {
   private slashT = -1
   private side = 1
   private sway = new THREE.Vector2()
+  private parryT = -1
 
   constructor(color: string) {
     this.group.add(this.pivot)
@@ -49,6 +50,12 @@ export class ViewModel {
     )
     this.trail.position.set(0, -0.05, -1.1)
     this.group.add(this.trail)
+  }
+
+  /** Raise the blade crosswise in front of you to block. */
+  parry() {
+    this.parryT = 0
+    this.slashT = -1
   }
 
   slash(side: number) {
@@ -104,6 +111,17 @@ export class ViewModel {
       }
     }
 
+    if (this.parryT >= 0) {
+      this.parryT += dt
+      const k = this.parryT < 0.08 ? this.parryT / 0.08 : this.parryT > 0.35 ? Math.max(0, 1 - (this.parryT - 0.35) / 0.15) : 1
+      if (this.parryT > 0.5) this.parryT = -1
+      rx = THREE.MathUtils.lerp(rx, 0.15, k)
+      ry = THREE.MathUtils.lerp(ry, 0.1, k)
+      rz = THREE.MathUtils.lerp(rz, 1.45, k)
+      px = THREE.MathUtils.lerp(px, 0.12, k)
+      py = THREE.MathUtils.lerp(py, -0.12, k)
+      pz = THREE.MathUtils.lerp(pz, -0.5, k)
+    }
     this.pivot.rotation.set(rx + this.sway.y, ry + this.sway.x, rz)
     this.pivot.position.set(
       px + Math.cos(this.bobT) * bobAmt + this.sway.x,

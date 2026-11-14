@@ -14,9 +14,9 @@ export function buildSky(): THREE.Mesh {
     depthWrite: false,
     fog: false,
     uniforms: {
-      top: { value: new THREE.Color('#0d1030') },
-      mid: { value: new THREE.Color('#5a2f72') },
-      horizon: { value: new THREE.Color('#ff8f6a') },
+      top: { value: new THREE.Color('#6f9cc9') },
+      mid: { value: new THREE.Color('#b9cde0') },
+      horizon: { value: new THREE.Color('#eef0f0') },
       sunDir: { value: SUN_DIR },
     },
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
@@ -26,16 +26,13 @@ export function buildSky(): THREE.Mesh {
         float h = vDir.y;
         vec3 c = mix(horizon, mid, smoothstep(0.0, 0.22, h));
         c = mix(c, top, smoothstep(0.22, 0.75, h));
-        c = mix(c, horizon * 0.55, smoothstep(0.0, -0.2, h));
-        // thin cloud bands near the horizon
-        float band = sin(h * 90.0 + vDir.x * 4.0) * 0.5 + 0.5;
-        c += vec3(1.0, 0.55, 0.5) * band * 0.05 * smoothstep(0.02, 0.1, h) * (1.0 - smoothstep(0.1, 0.3, h));
-        // stars
-        vec3 cell = floor(vDir * 260.0);
-        float st = step(0.9965, hash(cell)) * smoothstep(0.25, 0.7, h);
-        c += vec3(st) * (0.5 + 0.5 * hash(cell + 3.1));
+        c = mix(c, horizon * 0.9, smoothstep(0.0, -0.2, h));
+        // soft streaky clouds
+        float n = hash(floor(vec3(vDir.x * 9.0, h * 40.0, vDir.z * 9.0)));
+        float band = smoothstep(0.55, 1.0, sin(h * 60.0 + vDir.x * 3.0 + vDir.z * 2.0) * 0.5 + 0.5);
+        c = mix(c, vec3(1.0), band * 0.35 * smoothstep(0.05, 0.15, h) * (1.0 - smoothstep(0.35, 0.6, h)) * (0.7 + 0.3 * n));
         float s = max(dot(vDir, sunDir), 0.0);
-        c += vec3(1.0, 0.75, 0.5) * pow(s, 600.0) * 3.0 + vec3(1.0, 0.5, 0.35) * pow(s, 12.0) * 0.3;
+        c += vec3(1.0, 0.95, 0.85) * pow(s, 500.0) * 2.0 + vec3(1.0, 0.92, 0.8) * pow(s, 8.0) * 0.25;
         gl_FragColor = vec4(c, 1.0);
       }`,
   })
@@ -85,8 +82,8 @@ export function buildSkyline(): THREE.Mesh {
       })
     }
   }
-  layer(720, 25, 110, 1.3, new THREE.Color('#c86a78'), new THREE.Color('#5a3060'))
-  layer(520, 5, 55, 4.1, new THREE.Color('#9a4a68'), new THREE.Color('#2d1d40'))
+  layer(720, 25, 110, 1.3, new THREE.Color('#e6eaee'), new THREE.Color('#b9c6d4'))
+  layer(520, 5, 55, 4.1, new THREE.Color('#dde2e8'), new THREE.Color('#9eabbb'))
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
   geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
@@ -119,7 +116,6 @@ export class Embers {
     this.mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
       uniforms: { time: { value: 0 }, scale: { value: 300 } },
       vertexShader: `uniform float time; uniform float scale; attribute float seed; varying float vA;
         void main(){
@@ -136,7 +132,7 @@ export class Embers {
         void main(){
           vec2 d = gl_PointCoord - 0.5;
           float a = smoothstep(0.5, 0.0, length(d)) * vA;
-          gl_FragColor = vec4(1.0, 0.62, 0.38, a);
+          gl_FragColor = vec4(0.9, 0.16, 0.22, a * 0.8);
         }`,
     })
     this.points = new THREE.Points(geo, this.mat)

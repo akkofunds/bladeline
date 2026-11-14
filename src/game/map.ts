@@ -171,6 +171,17 @@ export function generateMap(): { boxes: Box[]; spawns: THREE.Vector3[] } {
     boxes.push(b)
   }
 
+  // Long, tall wallrun walls between the mid ring and the outskirts
+  for (let i = 0; i < 8; i++) {
+    const a = ((i + 0.5) / 8) * Math.PI * 2
+    const r = 74 + rand() * 8
+    const x = Math.cos(a) * r
+    const z = Math.sin(a) * r
+    const eastWest = Math.abs(Math.cos(a)) > Math.abs(Math.sin(a))
+    const len = 24 + rand() * 8
+    boxes.push(box(x, 0, z, eastWest ? 1.6 : len, 12 + rand() * 4, eastWest ? len : 1.6, 'dark'))
+  }
+
   // Spawn points: open ground around the ring
   const spawns: THREE.Vector3[] = []
   for (let i = 0; i < 16; i++) {
@@ -270,10 +281,11 @@ export function buildMapMeshes(boxes: Box[], lite = false): THREE.Group {
       : new THREE.MeshStandardMaterial({ ...common, roughness: o.roughness ?? 0.85 })
   }
   const mats: Record<BoxKind, THREE.Material> = {
-    ground: mat({ map: gridTexture('#1a1d2e', '#262b44', '#35335a'), roughness: 0.9 }),
-    stone: mat({ map: gridTexture('#8f8478', '#7b7066', '#ab998a'), roughness: 0.8 }),
-    dark: mat({ map: gridTexture('#2a2c3f', '#363954', '#47496a'), roughness: 0.85 }),
-    trim: mat({ map: gridTexture('#b8333f', '#9c2833', '#ff6b74'), roughness: 0.6, emissive: '#4a0c14' }),
+    // light concrete daylight palette with red accents
+    ground: mat({ map: gridTexture('#c9cdd3', '#b7bcc4', '#a7adb6'), roughness: 0.9 }),
+    stone: mat({ map: gridTexture('#eef0f2', '#dfe2e6', '#cfd3d9'), roughness: 0.8 }),
+    dark: mat({ map: gridTexture('#a3a9b2', '#959ba5', '#878e98'), roughness: 0.85 }),
+    trim: mat({ map: gridTexture('#e3303f', '#c92535', '#ff6b76'), roughness: 0.6, emissive: '#3a070c' }),
     pad: mat({ color: '#2ef2ff', emissive: '#14c8e0', ei: 1.4 }),
     boost: mat({ color: '#ffb02e', emissive: '#ff8a00', ei: 1.3 }),
   }
@@ -283,6 +295,23 @@ export function buildMapMeshes(boxes: Box[], lite = false): THREE.Group {
     list.push(boxGeometry(b, b.kind === 'ground' ? 4 : 4))
     byKind.set(b.kind, list)
   }
+  // Crisp dark outlines on every block: one draw call, and it makes the light map read clearly
+  const edgeGeos: THREE.BufferGeometry[] = []
+  for (const b of boxes) {
+    if (b.kind === 'ground' || b.kind === 'pad' || b.kind === 'boost') continue
+    const g = new THREE.BoxGeometry(b.maxx - b.minx, b.maxy - b.miny, b.maxz - b.minz)
+    g.translate((b.minx + b.maxx) / 2, (b.miny + b.maxy) / 2, (b.minz + b.maxz) / 2)
+    const e = new THREE.EdgesGeometry(g)
+    g.dispose()
+    edgeGeos.push(e)
+  }
+  const edges = new THREE.LineSegments(
+    mergeGeometries(edgeGeos),
+    new THREE.LineBasicMaterial({ color: '#1f232a', transparent: true, opacity: 0.55 }),
+  )
+  edgeGeos.forEach((g) => g.dispose())
+  group.add(edges)
+
   for (const [kind, geos] of byKind) {
     const merged = mergeGeometries(geos)
     geos.forEach((g) => g.dispose())

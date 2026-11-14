@@ -66,6 +66,22 @@ export interface HudState {
   hitMarker: number // timestamp of last landed hit
   boostAt: number // timestamp of the last hook slingshot / momentum hop
   boostAmount: number
+  parryReady: number // 0..1
+  parrying: boolean
+  parryAt: number // timestamp of your last successful parry
+  parriedAt: number // timestamp of when you were last parried
+  stunned: boolean
+  sliding: boolean
+  wallrun: boolean
+  stamina: number
+  staminaMax: number
+  ammo: number
+  ammoMax: number
+  instability: number
+  destabilized: boolean
+  fatigued: boolean
+  clashAt: number
+  clashWon: boolean
   lastDamage: number
   damageFlash: number // timestamp of last damage taken
   locked: boolean
@@ -99,8 +115,20 @@ export type NetMessage =
       hp: number
       slash: number // slash sequence counter
       g: Vec3Tuple | null // grapple anchor
+      sl?: boolean // sliding
+      in?: number // instability 0..100
     }
-  | { t: 'hit'; from: string; to: string; dmg: number; kb: Vec3Tuple }
+  | {
+      t: 'hit'
+      from: string
+      to: string
+      dmg: number
+      kb: Vec3Tuple
+      k?: 'slash' | 'gun' | 'slam' | 'clash'
+      ins?: number // instability to add (clashes, slams)
+    }
+  /** `from` parried an attack by `to`: `to` is stunned, or eats `dmg` from a deflected bullet */
+  | { t: 'parry'; from: string; to: string; dmg?: number }
   | { t: 'death'; id: string; by: string; speed: number }
   | { t: 'chat'; id: string; name: string; color: string; text: string }
   | { t: 'match'; m: MatchSync }

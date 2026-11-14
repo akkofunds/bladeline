@@ -114,7 +114,7 @@ export class Net {
       if (msg.t === 'match' || msg.t === 'welcome' || msg.t === 'reject' || msg.t === 'join') return
       // never trust a client to speak for someone else
       if ('id' in msg && msg.t !== 'leave' && msg.t !== 'death') (msg as { id: string }).id = conn.peer
-      if (msg.t === 'hit') msg.from = conn.peer
+      if (msg.t === 'hit' || msg.t === 'parry') msg.from = conn.peer
       if (msg.t === 'death') {
         msg.id = conn.peer
         this.trackDeath(msg.id, msg.by)
@@ -212,7 +212,7 @@ export class Net {
     for (const [id, c] of this.clients) {
       if (id === except || !c.open) continue
       // hits only matter to the target
-      if (msg.t === 'hit' && msg.to !== id) continue
+      if ((msg.t === 'hit' || msg.t === 'parry') && msg.to !== id) continue
       c.send(msg)
     }
   }

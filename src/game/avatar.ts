@@ -15,6 +15,7 @@ export interface AvatarPose {
   slashSide: number // 1 or -1
   grappling: boolean
   alive: boolean
+  sliding?: boolean
 }
 
 export const SLASH_TIME = 0.34
@@ -195,8 +196,8 @@ export class Avatar {
     this.drawLabel(100)
   }
 
-  drawLabel(hp: number) {
-    const key = `${this.name}|${Math.ceil(hp)}`
+  drawLabel(hp: number, destabilized = false) {
+    const key = `${this.name}|${Math.ceil(hp)}|${destabilized}`
     if (key === this.lastLabel) return
     this.lastLabel = key
     const c = this.labelCanvas
@@ -211,8 +212,13 @@ export class Avatar {
     g.fillText(this.name, 128, 28)
     g.fillStyle = 'rgba(0,0,0,0.6)'
     g.fillRect(48, 42, 160, 12)
-    g.fillStyle = hp > 50 ? '#7dff9b' : hp > 25 ? '#ffd24a' : '#ff4d5e'
+    g.fillStyle = destabilized ? '#ff2238' : hp > 50 ? '#7dff9b' : hp > 25 ? '#ffd24a' : '#ff4d5e'
     g.fillRect(50, 44, Math.max(0, (156 * hp) / 100), 8)
+    if (destabilized) {
+      g.strokeStyle = '#ff2238'
+      g.lineWidth = 3
+      g.strokeRect(46, 40, 164, 16)
+    }
     ;(this.label.material.map as THREE.Texture).needsUpdate = true
   }
 
@@ -339,7 +345,8 @@ export class Avatar {
     this.chest.rotation.x = ease(this.chest.rotation.x, -lean)
     this.chest.rotation.y = ease(this.chest.rotation.y, twist, fast)
     this.head.rotation.x = ease(this.head.rotation.x, THREE.MathUtils.clamp(pose.pitch, -0.8, 0.8) + lean * 0.8)
-    this.hips.position.y = 0.92 + bob - (pose.onGround ? 0 : 0.08)
+    this.hips.position.y = 0.92 + bob - (pose.onGround ? 0 : 0.08) - (pose.sliding ? 0.45 : 0)
+    this.body.rotation.x = ease(this.body.rotation.x, pose.sliding ? 0.35 : 0, 10)
     this.scarf.rotation.x = ease(this.scarf.rotation.x, 0.5 - Math.min(1, pose.speedH / 20) * 0.6 + Math.sin(this.phase * 2) * 0.1, 6)
   }
 }
