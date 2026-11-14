@@ -216,6 +216,12 @@ export class Avatar {
     ;(this.label.material.map as THREE.Texture).needsUpdate = true
   }
 
+  /** Teammates' name plates show through walls. */
+  setLabelXray(v: boolean) {
+    this.label.material.depthTest = !v
+    this.label.renderOrder = v ? 20 : 10
+  }
+
   setLabelVisible(v: boolean) {
     this.labelOn = v
     this.label.visible = v
@@ -240,17 +246,18 @@ export class Avatar {
     }
 
     const run = Math.min(1, pose.speedH / 8.5)
-    let thighL = 0,
-      thighR = 0,
-      kneeL = 0,
-      kneeR = 0,
-      armLx = 0,
-      armRx = 0.5,
+    // every branch below sets the leg/arm/lean values; these are the shared defaults
+    let thighL: number,
+      thighR: number,
+      kneeL: number,
+      kneeR: number,
+      armLx: number,
+      armRx: number,
       armRz = 0,
       elbowRx = 0.9,
       elbowLx = 0.3,
       armLz = -0.1,
-      lean = 0,
+      lean: number,
       twist = 0,
       bob = 0
 

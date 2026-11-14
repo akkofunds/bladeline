@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { BladeHop } from '@/components/BladeHop'
+import { Bladeline } from '@/components/bladeline/Bladeline'
 
 export const Route = createFileRoute('/')({
   component: Home,
@@ -8,9 +8,9 @@ export const Route = createFileRoute('/')({
 function Home() {
   return (
     <main>
-      <BladeHop />
+      <Bladeline />
       <noscript>
-        <div className="p-8 text-center">BLADEHOP needs JavaScript and WebGL to run.</div>
+        <div className="p-8 text-center">BLADELINE needs JavaScript and WebGL to run.</div>
       </noscript>
     </main>
   )

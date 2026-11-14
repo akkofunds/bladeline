@@ -1,6 +1,6 @@
-# BLADEHOP
+# BLADELINE
 
-A fast, browser-based multiplayer katana arena. Bunny hop and air-strafe to build speed, grapple off pillars when you lose momentum, and slash your friends across a wide open dusk-lit map. No guns, only blades, and the faster you're moving, the harder you hit.
+A fast, browser-based katana arena. Bunny hop and air-strafe to build speed, grapple off pillars when you lose momentum, and slash your friends across a wide open dusk-lit map. No guns, only blades, and the faster you're moving, the harder you hit.
 
 ## Features
 
@@ -10,7 +10,10 @@ A fast, browser-based multiplayer katana arena. Bunny hop and air-strafe to buil
 - **Dash (right click)**, **jump pads** and **boost strips** spread across a 280 m arena with a central shrine, corner towers, bridges, pillars and floating platforms.
 - **Animated ninjas**: procedural walk/run cycle, airborne tuck, slash swings with trails, grapple reach and death falls. You also get a first-person katana viewmodel and a third-person camera (V).
 - **Peer-to-peer rooms with chat**: host a room, share the 5-letter code or invite link, and chat with Enter. Built on PeerJS/WebRTC, so no game server is needed.
-- **Practice mode** against five sparring bots, plus bots duelling behind the lobby.
+- **Modes**: Quick Play FFA, Skirmish 2v2 and 5v5 (team deathmatch, no friendly fire), and a Training range with passive dummies. Queued matches are filled with bots; Custom rooms let friends play FFA, 2v2 or 5v5 together.
+- **Boot flow**: loading screen, a flyover of the map (Dusk Shrine), then the lobby with a queue timer, match-found pop and a pre-match roster screen.
+- **Mobile**: virtual stick, drag-to-look and touch buttons (drag on Jump/Slash/Hook to steer while holding them). Tap to play, no pointer lock needed.
+- **Runs on Chromebooks**: Low/Medium/High quality (auto-detected), automatic resolution scaling when the frame rate dips, blob shadows instead of shadow maps on Low, and baked vertex shading instead of extra lighting passes.
 
 ## Controls
 
@@ -39,7 +42,7 @@ pnpm dev          # http://localhost:3000
 netlify dev
 ```
 
-Open two browser windows to test multiplayer: host in one, then join with the code in the other.
+Open two browser windows to test multiplayer (Custom tab): host in one, then join with the code in the other.
 
 ## Ideas for later
 

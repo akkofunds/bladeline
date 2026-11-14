@@ -183,7 +183,7 @@ export function generateMap(): { boxes: Box[]; spawns: THREE.Vector3[] } {
 
 /* ---------- rendering ---------- */
 
-function gridTexture(base: string, line: string, accent: string, size = 256) {
+function gridTexture(base: string, line: string, accent: string, size = 128) {
   const c = document.createElement('canvas')
   c.width = c.height = size
   const g = c.getContext('2d')!
@@ -208,11 +208,15 @@ function gridTexture(base: string, line: string, accent: string, size = 256) {
   const tex = new THREE.CanvasTexture(c)
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping
   tex.colorSpace = THREE.SRGBColorSpace
-  tex.anisotropy = 8
+  tex.anisotropy = 4
   return tex
 }
 
-/** World-space UVs so grid lines are the same size everywhere (great for reading speed). */
+/**
+ * World-space UVs so grid lines are the same size everywhere (great for reading speed),
+ * plus baked vertex-colour shading: walls darken toward their base and undersides are dim.
+ * It reads like ambient occlusion but costs nothing at runtime.
+ */
 function boxGeometry(b: Box, uvScale: number) {
   const sx = b.maxx - b.minx
   const sy = b.maxy - b.miny
@@ -222,49 +226,56 @@ function boxGeometry(b: Box, uvScale: number) {
   const pos = g.attributes.position
   const nor = g.attributes.normal
   const uv = g.attributes.uv
+  const colors = new Float32Array(pos.count * 3)
+  const glow = b.kind === 'pad' || b.kind === 'boost'
   for (let i = 0; i < pos.count; i++) {
     const nx = Math.abs(nor.getX(i))
-    const ny = Math.abs(nor.getY(i))
+    const nyRaw = nor.getY(i)
+    const ny = Math.abs(nyRaw)
     const x = pos.getX(i)
     const y = pos.getY(i)
     const z = pos.getZ(i)
     if (ny > 0.5) uv.setXY(i, x / uvScale, z / uvScale)
     else if (nx > 0.5) uv.setXY(i, z / uvScale, y / uvScale)
     else uv.setXY(i, x / uvScale, y / uvScale)
+    let shade = 1
+    if (!glow && b.kind !== 'ground') {
+      if (nyRaw < -0.5) shade = 0.42 // undersides
+      else if (ny < 0.5) shade = 0.5 + 0.5 * Math.min(1, Math.max(0, y) / 10) // walls fade up from the floor
+      // side faces facing away from the sun read a touch darker
+      if (ny < 0.5) shade *= nor.getX(i) + nor.getZ(i) > 0 ? 1 : 0.82
+    }
+    colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = shade
   }
+  g.setAttribute('color', new THREE.BufferAttribute(colors, 3))
   return g
 }
 
-export function buildMapMeshes(boxes: Box[]): THREE.Group {
+/**
+ * `lite` swaps physically based materials for Lambert ones. They look almost the same here
+ * (everything is matte) and are much cheaper per pixel on integrated GPUs and phones.
+ */
+export function buildMapMeshes(boxes: Box[], lite = false): THREE.Group {
   const group = new THREE.Group()
+  const mat = (o: { map?: THREE.Texture; color?: string; roughness?: number; emissive?: string; ei?: number }) => {
+    const common = {
+      ...(o.map ? { map: o.map } : {}),
+      color: o.color ?? '#ffffff',
+      vertexColors: true,
+      emissive: new THREE.Color(o.emissive ?? '#000000'),
+      emissiveIntensity: o.ei ?? 1,
+    }
+    return lite
+      ? new THREE.MeshLambertMaterial(common)
+      : new THREE.MeshStandardMaterial({ ...common, roughness: o.roughness ?? 0.85 })
+  }
   const mats: Record<BoxKind, THREE.Material> = {
-    ground: new THREE.MeshStandardMaterial({
-      map: gridTexture('#1d1a2b', '#2c2742', '#3a2f55'),
-      roughness: 0.9,
-    }),
-    stone: new THREE.MeshStandardMaterial({
-      map: gridTexture('#8d7f74', '#7a6c62', '#a69384'),
-      roughness: 0.8,
-    }),
-    dark: new THREE.MeshStandardMaterial({
-      map: gridTexture('#2e2a3d', '#3a3550', '#4b4466'),
-      roughness: 0.85,
-    }),
-    trim: new THREE.MeshStandardMaterial({
-      map: gridTexture('#b8333f', '#9c2833', '#e0525e'),
-      roughness: 0.6,
-      emissive: new THREE.Color('#3a0a10'),
-    }),
-    pad: new THREE.MeshStandardMaterial({
-      color: '#2ef2ff',
-      emissive: new THREE.Color('#14c8e0'),
-      emissiveIntensity: 1.4,
-    }),
-    boost: new THREE.MeshStandardMaterial({
-      color: '#ffb02e',
-      emissive: new THREE.Color('#ff8a00'),
-      emissiveIntensity: 1.3,
-    }),
+    ground: mat({ map: gridTexture('#1a1d2e', '#262b44', '#35335a'), roughness: 0.9 }),
+    stone: mat({ map: gridTexture('#8f8478', '#7b7066', '#ab998a'), roughness: 0.8 }),
+    dark: mat({ map: gridTexture('#2a2c3f', '#363954', '#47496a'), roughness: 0.85 }),
+    trim: mat({ map: gridTexture('#b8333f', '#9c2833', '#ff6b74'), roughness: 0.6, emissive: '#4a0c14' }),
+    pad: mat({ color: '#2ef2ff', emissive: '#14c8e0', ei: 1.4 }),
+    boost: mat({ color: '#ffb02e', emissive: '#ff8a00', ei: 1.3 }),
   }
   const byKind = new Map<BoxKind, THREE.BufferGeometry[]>()
   for (const b of boxes) {
