@@ -33,6 +33,14 @@ A fast, browser-based katana arena. Bunny hop and air-strafe to build speed, gra
 
 TanStack Start + React 19, three.js for rendering, PeerJS (WebRTC data channels via the public PeerJS signalling server) for networking and chat, Tailwind CSS 4 + shadcn/ui for the HUD, and WebAudio-synthesised sound effects. Deployed on Netlify.
 
+## Deploying
+
+The game is fully client-side, so it builds as a static site: `pnpm build` writes `dist/client/index.html` plus assets.
+
+- **Vercel**: import the repo. `vercel.json` sets the build command (`pnpm build`) and output directory (`dist/client`). No settings to change.
+- **Netlify**: `netlify.toml` is already set up (publishes `dist/client`).
+- **Anything else**: upload `dist/client` to any static host.
+
 ## Running locally
 
 ```bash

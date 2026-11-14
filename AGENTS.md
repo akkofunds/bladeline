@@ -44,6 +44,10 @@ src/
 - The HUD is React state updated at about 15 Hz via `onHud`; per-frame visuals stay inside the engine.
 - Theme colours are in `src/styles.css` under `.dark` (the html element always has `class="dark"`).
 
+## Deploy
+
+Static SPA build (TanStack Start `spa` mode in `vite.config.ts`, shell prerendered to `dist/client/index.html`). `vercel.json` and `netlify.toml` both publish `dist/client`. The Netlify adapter plugin is only loaded when `NETLIFY` is set.
+
 ## Conventions
 
 - Strict TypeScript, no unused locals. Use the `@/` alias.
