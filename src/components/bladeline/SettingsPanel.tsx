@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { detectQuality, type ControlScheme, type QualitySetting, type Settings } from './settings'
+import { detectQuality, type ControlScheme, type QualitySetting, type ResolutionSetting, type Settings } from './settings'
 import { AngledButton, SectionLabel } from './ui'
 
 export function SettingsPanel({
@@ -61,8 +61,24 @@ export function SettingsPanel({
               ]}
             />
             <p className="text-xs text-muted-foreground">
-              Low turns off real-time shadows and renders at a lower resolution. Best for Chromebooks and phones.
-              Resolution also drops automatically if the frame rate dips.
+              Low turns off real-time shadows and uses cheaper lighting. Best for Chromebooks and phones.
+            </p>
+          </Group>
+
+          <Group label="Resolution">
+            <Segmented<ResolutionSetting>
+              value={settings.resolution}
+              onChange={(resolution) => update({ resolution })}
+              options={[
+                ['auto', 'Auto'],
+                ['75', '75%'],
+                ['100', '100%'],
+                ['native', 'Native'],
+              ]}
+            />
+            <p className="text-xs text-muted-foreground">
+              Auto stays sharp and only lowers resolution if the game drops below about 40 FPS. Native renders every
+              pixel of high-DPI screens (sharpest, heaviest).
             </p>
           </Group>
 

@@ -6,7 +6,7 @@ A fast, browser-based katana arena. Bunny hop and air-strafe to build speed, gra
 
 - **Source-style movement**: ground friction, capped air acceleration and auto-hop (hold Space). Air-strafing with A/D while turning the mouse builds speed.
 - **Katana combat**: alternating left and right slashes. Damage scales with your speed (26 base, up to a one-shot 100), and walls block strikes.
-- **Grapple hook (F)**: hold F on any surface to swing. If you're slow, the hook pulls you back up to speed on attach.
+- **Hook (F)**: a glowing red line that reels you in hard. Let go in the air to slingshot, or tap jump while hooked to fling off it. Keep holding jump afterwards and your next few bhops each add speed.
 - **Dash (right click)**, **jump pads** and **boost strips** spread across a 280 m arena with a central shrine, corner towers, bridges, pillars and floating platforms.
 - **Animated ninjas**: procedural walk/run cycle, airborne tuck, slash swings with trails, grapple reach and death falls. You also get a first-person katana viewmodel and a third-person camera (V).
 - **Peer-to-peer rooms with chat**: host a room, share the 5-letter code or invite link, and chat with Enter. Built on PeerJS/WebRTC, so no game server is needed.
@@ -24,7 +24,8 @@ A fast, browser-based katana arena. Bunny hop and air-strafe to build speed, gra
 | A/D + mouse | Air strafe |
 | Left click | Slash |
 | Right click | Dash |
-| F (hold) | Grapple |
+| F (hold, release in air) | Hook. Letting go mid-air slingshots you forward |
+| Space while hooked | Jump off the hook with a fling; keep holding to bhop with bonus speed |
 | V | Toggle third person |
 | Enter / T | Chat |
 | Tab | Scoreboard |

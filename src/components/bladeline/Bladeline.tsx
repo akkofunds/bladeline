@@ -117,6 +117,8 @@ export function Bladeline() {
         { quality: resolveQuality(s.quality) },
       )
       gameRef.current = engine
+      // dev-only handle for debugging in the browser console / automated tests
+      if (import.meta.env.DEV) (window as unknown as { __bladeline?: Game }).__bladeline = engine
       setGame(engine)
       setReady(true)
     })
@@ -135,6 +137,7 @@ export function Bladeline() {
       g.touchLookScale = settings.touchSens
       g.setVolume(settings.volume)
       g.setQuality(resolveQuality(settings.quality))
+      g.setResolution(settings.resolution)
       g.setTouchMode(resolveTouch(settings.controls))
     }
     if (settingsLoaded) saveSettings(settings)

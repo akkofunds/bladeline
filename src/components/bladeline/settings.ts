@@ -4,6 +4,7 @@ export const COLORS = ['#ff3b5c', '#ff9f1c', '#ffe14d', '#3bff8f', '#2ee6ff', '#
 
 export type QualitySetting = Quality | 'auto'
 export type ControlScheme = 'auto' | 'touch' | 'mouse'
+export type ResolutionSetting = 'auto' | '75' | '100' | 'native'
 
 export interface Settings {
   name: string
@@ -11,6 +12,7 @@ export interface Settings {
   sens: number
   touchSens: number
   quality: QualitySetting
+  resolution: ResolutionSetting
   controls: ControlScheme
   volume: number
   showFps: boolean
@@ -31,6 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sens: 2.2,
   touchSens: 1.6,
   quality: 'auto',
+  resolution: 'auto',
   controls: 'auto',
   volume: 0.5,
   showFps: false,
@@ -118,7 +121,8 @@ export const DESKTOP_CONTROLS: [string, string][] = [
   ['A/D + mouse', 'Air strafe for speed'],
   ['Left click', 'Katana slash'],
   ['Right click', 'Dash'],
-  ['F (hold)', 'Grapple hook'],
+  ['F (hold / release)', 'Hook, let go to slingshot'],
+  ['Space while hooked', 'Jump off the hook (fling)'],
   ['V', 'Third-person camera'],
   ['Enter / T', 'Chat'],
   ['Tab', 'Scoreboard'],
@@ -130,7 +134,7 @@ export const TOUCH_CONTROLS: [string, string][] = [
   ['JUMP (hold)', 'Auto bunny hop'],
   ['Slash', 'Katana strike'],
   ['Dash', 'Burst forward'],
-  ['Hook (hold)', 'Grapple'],
+  ['Hook (hold / release)', 'Grapple, let go to slingshot'],
 ]
 
 export const MODE_ORDER: MatchMode[] = ['ffa', 'duo', 'squad', 'training']

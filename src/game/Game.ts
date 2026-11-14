@@ -28,6 +28,13 @@ const TRAINING_RESPAWN = 1.5
 const COUNTDOWN = 4
 const ONLINE_RESTART = 12
 const EYE = 1.62
+/** hook release in the air: speed added along your travel direction */
+const SLING_BASE = 2.5
+const SLING_MAX = 9
+/** after a hook release, the next few hops each add speed while jump is held */
+const MOMENTUM_WINDOW = 1.8
+const MOMENTUM_HOPS = 3
+const MOMENTUM_HOP_BONUS = 1.6
 const TICK = 1 / 120
 const BOT_NAMES = ['Kage', 'Sora', 'Ren', 'Hiro', 'Yumi', 'Tetsu', 'Mei', 'Akio', 'Rin', 'Daichi', 'Nami', 'Shin']
 const BOT_COLORS = ['#ff5d73', '#ffb84d', '#7dff9b', '#5dd6ff', '#c58bff', '#ff8bd8', '#f4ff6b', '#8bffef']
@@ -51,7 +58,7 @@ interface Entity {
   id: string
   info: PlayerInfo
   avatar: Avatar
-  rope: THREE.Mesh
+  rope: Rope
   blob: THREE.Mesh
   pos: THREE.Vector3
   netPos: THREE.Vector3
@@ -67,6 +74,14 @@ interface Entity {
   lastUpdate: number
   bot?: Bot
 }
+
+/** Glowing red hook line: a hot core, a soft additive glow, and a flare at the anchor. */
+interface Rope {
+  line: THREE.Group
+  anchor: THREE.Mesh
+}
+
+export type ResolutionMode = 'auto' | '75' | '100' | 'native'
 
 interface Particle {
   mesh: THREE.Mesh
@@ -122,6 +137,7 @@ export class Game {
   private quality: Quality
   private baseRatio = 1
   private renderScale = 1
+  private resolution: ResolutionMode = 'auto'
   private perfT = 0
   private perfFrames = 0
   private goodWindows = 0
@@ -168,7 +184,7 @@ export class Game {
   private streak = 0
   private thirdPerson = false
   private myAvatar: Avatar
-  private myRope: THREE.Mesh
+  private myRope: Rope
   private myBlob: THREE.Mesh
   private viewModel: ViewModel
   private lastKiller: string | null = null
@@ -188,6 +204,12 @@ export class Game {
   private touchMoveX = 0
   private touchMoveY = 0
   private touchJump = false
+  private jumpHeldPrev = false
+  private momentumT = 0
+  private momentumHops = 0
+  private fovKick = 0
+  private boostAt = 0
+  private boostAmount = 0
 
   private sendT = 0
   private hudT = 0
@@ -201,7 +223,8 @@ export class Game {
   ) {
     this.quality = opts.quality
     this.renderer = new THREE.WebGLRenderer({
-      antialias: opts.quality === 'high',
+      // MSAA is cheap at 1x on laptops/Chromebooks and removes the jaggies; phones skip it
+      antialias: !(window.matchMedia?.('(pointer: coarse)').matches ?? false),
       powerPreference: 'high-performance',
       stencil: false,
     })
@@ -242,7 +265,7 @@ export class Game {
     this.myAvatar.root.visible = false
     this.myAvatar.setLabelVisible(false)
     this.scene.add(this.myAvatar.root)
-    this.myRope = this.makeRope('#ffffff')
+    this.myRope = this.makeRope()
     this.myBlob = makeBlobShadow()
     this.scene.add(this.myBlob)
     this.viewModel = new ViewModel(this.info.color)
@@ -369,9 +392,12 @@ export class Game {
     const q = this.quality
     const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false
     const dpr = window.devicePixelRatio || 1
-    const cap = q === 'high' ? 2 : q === 'medium' ? 1.25 : 1
-    this.baseRatio = Math.min(dpr, coarse ? Math.min(cap, 1.25) : cap)
-    this.renderScale = q === 'low' ? 0.85 : 1
+    if (this.resolution === 'native') this.baseRatio = Math.min(dpr, 2)
+    else {
+      const cap = q === 'high' ? 2 : q === 'medium' ? 1.5 : 1.25
+      this.baseRatio = Math.min(dpr, coarse ? Math.min(cap, 1.5) : cap)
+    }
+    this.renderScale = this.resolution === '75' ? 0.75 : 1
     this.applyRatio()
 
     const shadows = q !== 'low'
@@ -416,6 +442,13 @@ export class Game {
     this.renderer.setPixelRatio(Math.max(0.5, this.baseRatio * this.renderScale))
   }
 
+  /** 'auto' adapts to the frame rate; the others lock the resolution. */
+  setResolution(mode: ResolutionMode) {
+    if (mode === this.resolution) return
+    this.resolution = mode
+    this.applyQuality(true)
+  }
+
   /** Drop render resolution when frames run long, bring it back when there's headroom. */
   private adaptResolution(rawDt: number) {
     if (rawDt > 0.25 || document.hidden) return
@@ -426,10 +459,12 @@ export class Game {
     this.fps = Math.round(1 / avg)
     this.perfT = 0
     this.perfFrames = 0
+    if (this.resolution !== 'auto') return
     const max = 1
-    const min = this.quality === 'high' ? 0.7 : 0.55
-    if (avg > 1 / 45 && this.renderScale > min) {
-      this.renderScale = Math.max(min, this.renderScale - 0.1)
+    const min = 0.7
+    // only give up sharpness when the game is genuinely struggling (< ~40 FPS)
+    if (avg > 1 / 40 && this.renderScale > min) {
+      this.renderScale = Math.max(min, this.renderScale - 0.05)
       this.goodWindows = 0
       this.applyRatio()
     } else if (avg < 1 / 57) {
@@ -518,7 +553,7 @@ export class Game {
     }
     if (btn === 'grapple') {
       if (down) this.startGrapple()
-      else this.releaseGrapple()
+      else this.releaseGrapple(true)
     }
   }
 
@@ -577,7 +612,7 @@ export class Game {
   }
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code)
-    if (e.code === 'KeyF') this.releaseGrapple()
+    if (e.code === 'KeyF') this.releaseGrapple(true)
   }
   private onMouseMove = (e: MouseEvent) => {
     if (!this.locked) return
@@ -641,27 +676,58 @@ export class Game {
 
   /* ---------------- world helpers ---------------- */
 
-  private makeRope(color: string) {
-    const rope = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.03, 0.03, 1, 5, 1, true),
-      new THREE.MeshBasicMaterial({ color }),
+  private makeRope(): Rope {
+    const line = new THREE.Group()
+    const core = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.035, 0.035, 1, 6, 1, true),
+      new THREE.MeshBasicMaterial({ color: '#ff3347', fog: false }),
     )
-    rope.visible = false
-    this.scene.add(rope)
-    return rope
+    const glow = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.13, 0.13, 1, 8, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: '#ff1030',
+        transparent: true,
+        opacity: 0.35,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      }),
+    )
+    line.add(core, glow)
+    line.visible = false
+    const anchor = new THREE.Mesh(
+      new THREE.SphereGeometry(0.35, 10, 8),
+      new THREE.MeshBasicMaterial({
+        color: '#ff4a5c',
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      }),
+    )
+    anchor.visible = false
+    this.scene.add(line, anchor)
+    return { line, anchor }
   }
 
-  private placeRope(rope: THREE.Mesh, from: THREE.Vector3, to: THREE.Vector3 | null) {
+  private removeRope(r: Rope) {
+    this.scene.remove(r.line, r.anchor)
+  }
+
+  private placeRope(rope: Rope, from: THREE.Vector3, to: THREE.Vector3 | null, thickness = 1) {
     if (!to) {
-      rope.visible = false
+      rope.line.visible = rope.anchor.visible = false
       return
     }
     const d = _v1.subVectors(to, from)
     const len = d.length()
-    rope.visible = len > 0.1
-    rope.position.copy(from).addScaledVector(d, 0.5)
-    rope.scale.set(1, len, 1)
-    rope.quaternion.setFromUnitVectors(UP, d.normalize())
+    rope.line.visible = rope.anchor.visible = len > 0.1
+    rope.line.position.copy(from).addScaledVector(d, 0.5)
+    rope.line.scale.set(thickness, len, thickness)
+    rope.line.quaternion.setFromUnitVectors(UP, d.normalize())
+    rope.anchor.position.copy(to)
+    rope.anchor.scale.setScalar(0.85 + Math.sin(this.now * 30) * 0.15)
   }
 
   private placeBlob(blob: THREE.Mesh, pos: THREE.Vector3, visible: boolean) {
@@ -773,7 +839,7 @@ export class Game {
       id: info.id,
       info,
       avatar,
-      rope: this.makeRope(color),
+      rope: this.makeRope(),
       blob,
       pos: pos.clone(),
       netPos: pos.clone(),
@@ -820,7 +886,7 @@ export class Game {
 
   private removeEntity(e: Entity) {
     this.scene.remove(e.avatar.root)
-    this.scene.remove(e.rope)
+    this.removeRope(e.rope)
     this.scene.remove(e.blob)
     this.entities.delete(e.id)
   }
@@ -1241,16 +1307,39 @@ export class Game {
       const dir = new THREE.Vector3().subVectors(hit.point, eye).normalize()
       this.body.vel.addScaledVector(dir, Math.min(10, 16 - sp + 3))
     }
+    this.fovKick = 6
+    this.spark(this.body.grapple, '#ff3347', 10, 5)
     this.sfx.grapple()
   }
 
-  private releaseGrapple() {
+  /**
+   * `sling`: a deliberate release (letting go of the hook, or jumping off it). In the air that
+   * slingshots you along your travel direction and opens a momentum window for bhops.
+   * `fling` (jump pressed while hooked) adds an upward pop on top.
+   */
+  private releaseGrapple(sling = false, fling = false) {
     if (!this.grappleHeld && !this.body.grapple) return
     this.grappleHeld = false
-    if (this.body.grapple) {
-      this.body.grapple = null
-      this.grappleCD = GRAPPLE_COOLDOWN
-    }
+    if (!this.body.grapple) return
+    this.body.grapple = null
+    this.grappleCD = GRAPPLE_COOLDOWN
+    if (!sling || this.body.onGround || !this.alive) return
+    const v = this.body.vel
+    const h = Math.hypot(v.x, v.z)
+    const dir = h > 1 ? new THREE.Vector3(v.x / h, 0, v.z / h) : this.lookDir().setY(0).normalize()
+    const add = Math.min(SLING_MAX, SLING_BASE + h * 0.12 + (fling ? 2.5 : 0))
+    v.addScaledVector(dir, add)
+    v.y = Math.max(v.y, fling ? MOVE.jumpSpeed + 1.5 : 3)
+    this.momentumT = MOMENTUM_WINDOW
+    this.momentumHops = MOMENTUM_HOPS
+    this.fovKick = 8
+    this.flashBoost(add)
+    this.sfx.boost()
+  }
+
+  private flashBoost(amount: number) {
+    this.boostAt = performance.now()
+    this.boostAmount = Math.round(amount * 10) / 10
   }
 
   /* ---------------- bots ---------------- */
@@ -1440,9 +1529,25 @@ export class Game {
         const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
         const wish = fwd.multiplyScalar(f).addScaledVector(right, s)
         const jump = !frozen && (k.has('Space') || (this.touchActive && this.touchJump))
+        // tap jump while hooked: jump off the rope with a fling
+        if (jump && !this.jumpHeldPrev && this.body.grapple) this.releaseGrapple(true, true)
+        this.jumpHeldPrev = jump
+        this.momentumT = Math.max(0, this.momentumT - dt)
         const events: BodyEvent[] = []
         stepBody(this.body, { wish, jump }, dt, this.boxes, events)
         for (const ev of events) {
+          if (ev === 'jump' && this.momentumT > 0 && this.momentumHops > 0) {
+            // carried momentum: each hop right after a hook adds speed
+            const v = this.body.vel
+            const h = Math.hypot(v.x, v.z)
+            if (h > 1) {
+              v.x += (v.x / h) * MOMENTUM_HOP_BONUS
+              v.z += (v.z / h) * MOMENTUM_HOP_BONUS
+              this.flashBoost(MOMENTUM_HOP_BONUS)
+            }
+            this.momentumHops--
+            this.momentumT = MOMENTUM_WINDOW
+          }
           if (ev === 'jump') this.sfx.jump()
           if (ev === 'pad') this.sfx.pad()
           if (ev === 'boost') this.sfx.boost()
@@ -1534,7 +1639,7 @@ export class Game {
       this.sun.target.position.set(0, 0, 0)
       this.sun.position.copy(SUN_DIR).multiplyScalar(150)
       this.myAvatar.root.visible = false
-      this.myRope.visible = false
+      this.placeRope(this.myRope, this.body.pos, null)
       this.myBlob.visible = false
       return
     }
@@ -1585,7 +1690,8 @@ export class Game {
       const lateral = this.body.vel.dot(right)
       this.camera.rotation.z = THREE.MathUtils.clamp(-lateral * 0.003, -0.04, 0.04)
     }
-    const targetFov = 98 + THREE.MathUtils.clamp((this.body.vel.length() - 10) * 0.45, 0, 22)
+    this.fovKick = Math.max(0, this.fovKick - dt * 20)
+    const targetFov = 98 + THREE.MathUtils.clamp((this.body.vel.length() - 10) * 0.45, 0, 22) + this.fovKick
     this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 6)
     this.camera.updateProjectionMatrix()
 
@@ -1595,7 +1701,8 @@ export class Game {
       : eye
           .clone()
           .add(new THREE.Vector3(-0.35, -0.35, -0.3).applyEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ')))
-    this.placeRope(this.myRope, hand, this.alive ? this.body.grapple : null)
+    // first person: the line starts right next to the camera, so keep it slim
+    this.placeRope(this.myRope, hand, this.alive ? this.body.grapple : null, this.thirdPerson ? 1 : 0.4)
 
     this.viewModel.update(dt, speedH, this.body.onGround, mdx, mdy)
     this.sfx.setWind(this.body.vel.length())
@@ -1623,6 +1730,8 @@ export class Game {
       dashReady: 1 - this.dashCD / DASH_COOLDOWN,
       slashReady: 1 - this.slashCD / SLASH_COOLDOWN,
       hitMarker: this.hitMarker,
+      boostAt: this.boostAt,
+      boostAmount: this.boostAmount,
       lastDamage: this.lastDamage,
       damageFlash: this.damageFlash,
       locked: this.locked || this.touchActive,
